@@ -1704,8 +1704,25 @@ async function loadChart(parentCode, code, market, period) {
       vertLines: { color: '#2e3148' },
       horzLines: { color: '#2e3148' },
     },
-    rightPriceScale: { borderColor: '#2e3148' },
-    timeScale:       { borderColor: '#2e3148', timeVisible: isIntraday, secondsVisible: false },
+    rightPriceScale: {
+      borderColor: '#2e3148',
+      scaleMargins: { top: 0.1, bottom: 0.1 },  // 上下の余白で端の高値/安値が切れないように
+    },
+    timeScale: {
+      borderColor: '#2e3148',
+      timeVisible: isIntraday,
+      secondsVisible: false,
+      rightOffset: 4,                  // 右端に余白を確保（最終足が切れないように）
+      barSpacing: 8,
+      fixLeftEdge: true,               // 左端より外にスクロール不可（左端の足を常に表示）
+      fixRightEdge: true,              // 右端より外にスクロール不可（右端の足を常に表示）
+      lockVisibleTimeRangeOnResize: true,
+    },
+    handleScale: {
+      mouseWheel: true,
+      pinch: true,
+      axisPressedMouseMove: { time: true, price: true },
+    },
   });
   chartInstances[parentCode] = chart;
 

@@ -16,7 +16,7 @@ Environment variables:
 import json
 import os
 import requests as req_lib
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 import yfinance as yf
 
@@ -303,6 +303,22 @@ class StockHandler(BaseHTTPRequestHandler):
         # us (NASDAQ/NYSE) はそのまま
         return code
 
+    # ── 安全な数値キャスト（yfinance が時々文字列を返すので） ──
+    @staticmethod
+    def _num(v):
+        if v is None:
+            return None
+        if isinstance(v, bool):
+            return None
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
+        import math
+        if math.isnan(f) or math.isinf(f):
+            return None
+        return f
+
     # ── 株価データ取得 ─────────────────────────────────
     def _fetch_quote(self, code, market="jp"):
         ticker_str = self._ticker(code, market)
@@ -312,19 +328,19 @@ class StockHandler(BaseHTTPRequestHandler):
 
             try:
                 fi     = t.fast_info
-                price  = fi.last_price
-                high52 = fi.year_high
-                low52  = fi.year_low
-                cap    = fi.market_cap
+                price  = self._num(fi.last_price)
+                high52 = self._num(fi.year_high)
+                low52  = self._num(fi.year_low)
+                cap    = self._num(fi.market_cap)
             except Exception:
-                price  = info.get("regularMarketPrice") or info.get("currentPrice")
-                high52 = info.get("fiftyTwoWeekHigh")
-                low52  = info.get("fiftyTwoWeekLow")
-                cap    = info.get("marketCap")
+                price  = self._num(info.get("regularMarketPrice") or info.get("currentPrice"))
+                high52 = self._num(info.get("fiftyTwoWeekHigh"))
+                low52  = self._num(info.get("fiftyTwoWeekLow"))
+                cap    = self._num(info.get("marketCap"))
 
-            prev   = info.get("regularMarketPreviousClose") or info.get("previousClose")
-            change = (price - prev)        if (price and prev) else None
-            chgpct = (change / prev * 100) if (change and prev) else None
+            prev   = self._num(info.get("regularMarketPreviousClose") or info.get("previousClose"))
+            change = (price - prev)        if (price is not None and prev is not None) else None
+            chgpct = (change / prev * 100) if (change is not None and prev)             else None
 
             currency = "USD" if market == "us" else "JPY"
             return {
@@ -336,12 +352,12 @@ class StockHandler(BaseHTTPRequestHandler):
                 "fiftyTwoWeekHigh":           high52,
                 "fiftyTwoWeekLow":            low52,
                 "marketCap":                  cap,
-                "trailingPE":                 info.get("trailingPE"),
-                "priceToBook":                info.get("priceToBook"),
-                "dividendYield":              info.get("dividendYield"),
-                "revenueGrowth":              info.get("revenueGrowth"),
-                "grossMargins":               info.get("grossMargins"),
-                "regularMarketVolume":        info.get("regularMarketVolume") or info.get("volume"),
+                "trailingPE":                 self._num(info.get("trailingPE")),
+                "priceToBook":                self._num(info.get("priceToBook")),
+                "dividendYield":              self._num(info.get("dividendYield")),
+                "revenueGrowth":              self._num(info.get("revenueGrowth")),
+                "grossMargins":               self._num(info.get("grossMargins")),
+                "regularMarketVolume":        self._num(info.get("regularMarketVolume") or info.get("volume")),
                 "sector":                     info.get("sector", ""),
                 "industry":                   info.get("industry", ""),
                 "currency":                   currency,
@@ -382,6 +398,64 @@ class StockHandler(BaseHTTPRequestHandler):
             # 高成長・10倍候補
             "PLTR","CRWD","NET","DDOG","SNOW","S","ZS","MDB","GTLB","BILL",
         ],
+    }
+
+    # ── カテゴリ専用ユニバース（業界が明確に絞れるもの） ──
+    # ここに定義のあるカテゴリはこちらが優先される。なければ _UNIVERSE 全体を使う。
+    _CATEGORY_UNIVERSE = {
+        "ai": {
+            "jp": [
+                "8035",  # 東京エレクトロン（半導体製造装置）
+                "6857",  # アドバンテスト（半導体テスタ）
+                "6146",  # ディスコ（半導体製造装置）
+                "6920",  # レーザーテック（半導体検査）
+                "3436",  # SUMCO（シリコンウェハー）
+                "4063",  # 信越化学（半導体材料）
+                "7735",  # SCREEN（半導体製造装置）
+                "6963",  # ローム（半導体）
+                "7741",  # HOYA（フォトマスク）
+                "6967",  # 新光電気工業（半導体パッケージ）
+                "6273",  # SMC（半導体製造装置部品）
+                "6324",  # ハーモニック・ドライブ
+                "6526",  # ソシオネクスト（カスタムLSI）
+                "8053",  # 住友商事（AI関連投資）
+                "9984",  # ソフトバンクG（Arm保有）
+            ],
+            "us": [
+                "NVDA",  # 本命
+                "AVGO",  # AIネットワーク半導体
+                "AMD",   # GPU/CPU
+                "TSM",   # 台湾セミコン（ファウンドリー最大手）
+                "ASML",  # EUV露光装置
+                "MU",    # メモリー
+                "INTC",  # CPU/ファウンドリー
+                "AMAT",  # 半導体製造装置
+                "KLAC",  # 半導体検査
+                "LRCX",  # エッチング装置
+                "ARM",   # IPコア
+                "MRVL",  # データセンター半導体
+                "SMCI",  # AIサーバー
+                "TXN",   # アナログ半導体
+                "QCOM",  # モバイル/IoT
+                "ON",    # オンセミ（パワー半導体）
+                "MCHP",  # マイクロチップ
+            ],
+        },
+        "tenx": {
+            "jp": ["4385","6532","3994","4478","3697","4194","3923","4488","4849","7048"],
+            "us": ["PLTR","CRWD","NET","DDOG","SNOW","S","ZS","MDB","GTLB","BILL"],
+        },
+        "tech": {
+            "jp": [
+                "6758","9984","7741","8035","6861","6098","6367","6724","6762","6752",
+                "6971","4661","7733","6902","4543","6504","9613","6501","6301","7912",
+                "6857","6146","6920","3436","6963",
+            ],
+            "us": [
+                "AAPL","MSFT","NVDA","AMZN","GOOGL","META","TSLA","AVGO","ORCL","AMD",
+                "CRM","ADBE","NOW","QCOM","TXN","CSCO","INTU","NFLX","ASML","TSM",
+            ],
+        },
     }
 
     def _score_stock(self, info, category="other"):
@@ -460,7 +534,10 @@ class StockHandler(BaseHTTPRequestHandler):
         """ユニバースからスクリーニングして上位銘柄を返す"""
         import concurrent.futures
         exclude = set(exclude or [])
-        universe = [c for c in self._UNIVERSE.get(market, []) if c not in exclude]
+        # カテゴリ専用ユニバースがあれば優先（AI半導体・10倍候補・テックなど）
+        cat_uni = self._CATEGORY_UNIVERSE.get(category, {}).get(market)
+        source   = cat_uni if cat_uni else self._UNIVERSE.get(market, [])
+        universe = [c for c in source if c not in exclude]
 
         results = []
 
@@ -574,14 +651,29 @@ if __name__ == "__main__":
     print("  Press Ctrl+C to stop")
     print("=" * 48)
 
-    import threading, webbrowser
+    import threading, webbrowser, signal, sys
     def _open():
         import time; time.sleep(1.0)
         webbrowser.open(f"http://localhost:{PORT}")
     threading.Thread(target=_open, daemon=True).start()
 
-    server = HTTPServer(("127.0.0.1", PORT), StockHandler)
+    server = ThreadingHTTPServer(("127.0.0.1", PORT), StockHandler)
+    server.daemon_threads = True       # メインスレッド終了時に処理中スレッドも終了
+    server.allow_reuse_address = True  # 再起動時に "Address in use" を回避
+
+    # Ctrl+C / Ctrl+Break を即座に受け取って shutdown する
+    def _stop(signum, frame):
+        print("\nStopping server...")
+        threading.Thread(target=server.shutdown, daemon=True).start()
+    signal.signal(signal.SIGINT, _stop)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, _stop)
+
     try:
-        server.serve_forever()
+        server.serve_forever(poll_interval=0.3)
     except KeyboardInterrupt:
-        print("\nServer stopped.")
+        pass
+    finally:
+        server.server_close()
+        print("Server stopped.")
+        sys.exit(0)
