@@ -147,11 +147,18 @@ const chartInstances = {};      // LightweightCharts インスタンス
 ## 依存ライブラリ
 
 ```
-Python: yfinance, http.server（標準ライブラリ）
+Python: yfinance, requests, anthropic, http.server（標準ライブラリ）
 JS: Lightweight Charts v3.8.0（unpkg CDN）
 ```
 
+パッケージ管理: **uv**（pyproject.toml + uv.lock）
+
 インストール:
 ```
-pip install yfinance
+uv sync
+```
+
+実行:
+```
+uv run python server.py
 ```

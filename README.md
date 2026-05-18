@@ -33,17 +33,28 @@ server.py              ← ローカルPythonサーバー（port 5000）
 watchlist.json         ← ウォッチリストの永続化（.gitignore対象）
 watchlist.example.json ← サンプルデータ
 start_server.bat       ← Windows用起動スクリプト
-requirements.txt       ← Python依存
+pyproject.toml         ← プロジェクト定義 + 依存
+uv.lock                ← 依存ロックファイル
 ```
 
 ---
 
 ## 🚀 セットアップ
 
+### 前提: [uv](https://docs.astral.sh/uv/) をインストール
+```powershell
+# Windows
+winget install --id=astral-sh.uv
+
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
 ### 1. 依存パッケージのインストール
 ```bash
-pip install -r requirements.txt
+uv sync
 ```
+これで `.venv` に必要なパッケージが自動でインストールされます。
 
 ### 2. （任意）Claude APIキーを環境変数に設定
 AI解説機能を使う場合のみ必要です。
@@ -64,7 +75,7 @@ cp watchlist.example.json watchlist.json
 start_server.bat
 
 # その他
-python server.py
+uv run python server.py
 ```
 ブラウザで http://localhost:5000 が自動で開きます。
 
