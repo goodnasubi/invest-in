@@ -1,0 +1,587 @@
+"""
+Stock Watchlist - Local Data Server
+Serves watchlist.html and fetches Japanese stock data from Yahoo Finance.
+
+Usage:
+  python server.py
+  Then open http://localhost:5000 in your browser.
+
+Requirements:
+  pip install yfinance requests anthropic
+
+Environment variables:
+  ANTHROPIC_API_KEY  - Claude APIキー（/api/explain で使用、未設定なら機能無効）
+"""
+
+import json
+import os
+import requests as req_lib
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
+import yfinance as yf
+
+PORT           = 5000
+HERE           = os.path.dirname(os.path.abspath(__file__))
+WATCHLIST_FILE = os.path.join(HERE, "watchlist.json")
+
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+# ── Anthropic クライアント（遅延初期化） ──────────────
+_anthropic_client = None
+def _get_anthropic():
+    global _anthropic_client
+    if _anthropic_client is not None:
+        return _anthropic_client
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        return None
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return None
+    _anthropic_client = Anthropic(api_key=api_key)
+    return _anthropic_client
+
+# 解説のサーバー側キャッシュ（コード+カテゴリ+スコアでキー）
+_explain_cache = {}
+
+
+class StockHandler(BaseHTTPRequestHandler):
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        path   = parsed.path
+
+        # ── HTML を配信 ──────────────────────────────
+        if path in ("/", "/watchlist.html", "/index.html"):
+            self._send_file("watchlist.html", "text/html; charset=utf-8")
+            return
+
+        # ── ヘルスチェック ────────────────────────────
+        if path == "/health":
+            self._send_json({"status": "ok"})
+            return
+
+        # ── ウォッチリスト読み込み GET /api/watchlist ──
+        if path == "/api/watchlist":
+            try:
+                if os.path.exists(WATCHLIST_FILE):
+                    with open(WATCHLIST_FILE, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                else:
+                    data = []
+                self._send_json(data)
+            except Exception as e:
+                print(f"  [ERROR] read watchlist: {e}")
+                self._send_json([])
+            return
+
+        # ── 株価取得 /api/quote?code=7203&market=jp ──────
+        if path == "/api/quote":
+            params = parse_qs(parsed.query)
+            code   = params.get("code",   [""])[0].strip().upper()
+            market = params.get("market", ["jp"])[0].strip().lower()
+            if not code:
+                self._send_json({"error": "code parameter required"}, 400)
+                return
+            data = self._fetch_quote(code, market)
+            if data is None:
+                self._send_json({"error": f"Failed to fetch {code}"}, 500)
+            else:
+                self._send_json(data)
+            return
+
+        # ── ヒストリカルデータ /api/history?code=7203&market=jp&period=6mo ─
+        if path == "/api/history":
+            params = parse_qs(parsed.query)
+            code   = params.get("code",   [""])[0].strip().upper()
+            market = params.get("market", ["jp"])[0].strip().lower()
+            period = params.get("period", ["1d"])[0].strip()
+            interval_map = {
+                "1d":  "5m",   # 1日：5分足
+                "5d":  "30m",  # 5日：30分足
+                "1mo": "1d",
+                "3mo": "1d",
+                "6mo": "1d",
+                "1y":  "1d",
+                "5y":  "1wk",
+            }
+            if period not in interval_map:
+                period = "1d"
+            interval = interval_map[period]
+            ticker_str = self._ticker(code, market)
+            try:
+                import math
+                intraday = interval in ("5m", "15m", "30m", "60m", "1h")
+                t    = yf.Ticker(ticker_str)
+                hist = t.history(period=period, interval=interval)
+                result = []
+                for date, row in hist.iterrows():
+                    o, h, l, c = row.get("Open"), row.get("High"), row.get("Low"), row.get("Close")
+                    if any(v is None or (isinstance(v, float) and math.isnan(v)) for v in [o, h, l, c]):
+                        continue
+                    vol = row.get("Volume", 0)
+                    # イントラデイは Unixタイムスタンプ（秒）、日次以上は YYYY-MM-DD 文字列
+                    if intraday:
+                        try:
+                            time_val = int(date.timestamp())
+                        except Exception:
+                            time_val = int(date.value // 1_000_000_000)
+                    else:
+                        time_val = date.strftime("%Y-%m-%d")
+                    result.append({
+                        "time":     time_val,
+                        "open":     round(float(o), 4),
+                        "high":     round(float(h), 4),
+                        "low":      round(float(l), 4),
+                        "close":    round(float(c), 4),
+                        "volume":   int(vol) if vol and not math.isnan(vol) else 0,
+                        "intraday": intraday,
+                    })
+                self._send_json(result)
+            except Exception as e:
+                print(f"  [ERROR] history {code}: {e}")
+                self._send_json({"error": str(e)}, 500)
+            return
+
+        # ── 関連銘柄取得 /api/related?code=7203&market=jp ─
+        if path == "/api/related":
+            params = parse_qs(parsed.query)
+            code   = params.get("code",   [""])[0].strip().upper()
+            market = params.get("market", ["jp"])[0].strip().lower()
+            if not code:
+                self._send_json({"error": "code parameter required"}, 400)
+                return
+            data = self._fetch_related(code, market)
+            self._send_json(data)
+            return
+
+        # ── スクリーニング /api/screen?market=jp&category=dividend&exclude=7203,6758 ─
+        if path == "/api/screen":
+            params   = parse_qs(parsed.query)
+            market   = params.get("market",   ["jp"])[0].strip().lower()
+            category = params.get("category", ["other"])[0].strip()
+            exclude  = [c.strip().upper() for c in params.get("exclude", [""])[0].split(",") if c.strip()]
+            data = self._screen_stocks(market, category, exclude)
+            self._send_json(data)
+            return
+
+        self._send_json({"error": "Not found"}, 404)
+
+    # ── ウォッチリスト保存 POST /api/watchlist ────────
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/watchlist":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body   = self.rfile.read(length)
+                data   = json.loads(body)
+                with open(WATCHLIST_FILE, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                self._send_json({"status": "ok"})
+                print(f"  Watchlist saved: {len(data)} items -> {WATCHLIST_FILE}")
+            except Exception as e:
+                print(f"  [ERROR] save watchlist: {e}")
+                self._send_json({"error": str(e)}, 500)
+            return
+
+        # ── スコア解説 POST /api/explain ──────────────
+        if parsed.path == "/api/explain":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body   = json.loads(self.rfile.read(length))
+                text   = self._explain_score(body)
+                if text is None:
+                    self._send_json({"error": "Claude APIキーが未設定です（環境変数 ANTHROPIC_API_KEY）"}, 503)
+                else:
+                    self._send_json({"explanation": text})
+            except Exception as e:
+                print(f"  [ERROR] explain: {e}")
+                self._send_json({"error": str(e)}, 500)
+            return
+
+        self._send_json({"error": "Not found"}, 404)
+
+    # ── Claude でスコアを解説 ─────────────────────────
+    def _explain_score(self, body):
+        client = _get_anthropic()
+        if client is None:
+            return None
+
+        code     = body.get("code", "")
+        name     = body.get("name", code)
+        category = body.get("category", "other")
+        score    = body.get("score")
+        detail   = body.get("detail", {}) or {}
+        price    = body.get("price")
+        currency = body.get("currency", "JPY")
+        per      = body.get("per")
+        pbr      = body.get("pbr")
+        div      = body.get("div")
+        pos52    = body.get("pos52")
+        revG     = body.get("revenueGrowth")
+        gm       = body.get("grossMargins")
+        cap      = body.get("marketCap")
+
+        cache_key = f"{code}|{category}|{score}"
+        if cache_key in _explain_cache:
+            return _explain_cache[cache_key]
+
+        cat_labels = {
+            "undervalue": "💎 割安優良株（PER/PBR重視）",
+            "tech":       "🚀 先進技術（成長性重視）",
+            "dividend":   "💰 安定配当（配当利回り重視）",
+            "ai":         "🤖 AI半導体（将来性重視）",
+            "tenx":       "💥 10倍候補（売上成長・小型・高粗利重視）",
+            "other":      "📌 その他",
+        }
+        cat_label = cat_labels.get(category, category)
+
+        # 指標の文字列化
+        metric_lines = []
+        if per   is not None: metric_lines.append(f"・PER: {per:.1f} 倍")
+        if pbr   is not None: metric_lines.append(f"・PBR: {pbr:.2f} 倍")
+        if div   is not None: metric_lines.append(f"・配当利回り: {div*100:.2f}%")
+        if pos52 is not None: metric_lines.append(f"・52週レンジ位置: {pos52:.0f}%（0=安値、100=高値）")
+        if revG  is not None: metric_lines.append(f"・売上成長率: {revG*100:.1f}%")
+        if gm    is not None: metric_lines.append(f"・粗利率: {gm*100:.1f}%")
+        if cap   is not None:
+            cap_str = f"${cap/1e9:.1f}B" if currency == "USD" else (
+                f"{cap/1e12:.2f}兆円" if cap >= 1e12 else f"{cap/1e8:.0f}億円")
+            metric_lines.append(f"・時価総額: {cap_str}")
+
+        detail_lines = []
+        det_labels = {"per":"PER","pbr":"PBR","div":"配当","pos":"52週位置",
+                      "revG":"売上成長","cap":"時価総額","gm":"粗利率"}
+        for k, v in detail.items():
+            detail_lines.append(f"・{det_labels.get(k, k)}: {v}/25点")
+
+        price_str = ""
+        if price is not None:
+            price_str = f"${price:.2f}" if currency == "USD" else f"{price:,.1f}円"
+
+        prompt = f"""以下は株式の買いタイミング判定結果です。スコアの根拠と注目ポイントを、日本語の口語で**3行以内**で簡潔に説明してください。
+
+【絶対ルール】
+- このユーザーは「超長期・買いのみ」の投資方針。**売り推奨は絶対にしない**こと。
+- 「いつ買うか」の観点で語ること。
+- 投資助言ではなく、データ解釈の補助情報として書くこと。
+
+【銘柄】 {name}（{code}）
+【カテゴリ】 {cat_label}
+【現在値】 {price_str}
+【総合スコア】 {score}/100点
+
+【指標値】
+{chr(10).join(metric_lines) or "（データ不足）"}
+
+【スコア内訳（25点満点）】
+{chr(10).join(detail_lines) or "（なし）"}
+
+3行以内で：
+1行目：この銘柄の現状を一言で
+2行目：スコアの主な根拠（高/低い要因）
+3行目：このカテゴリの観点での買い時の判断（"様子見" / "押し目待ち" / "良い買い場" など）"""
+
+        try:
+            msg = client.messages.create(
+                model="claude-haiku-4-5",
+                max_tokens=400,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = msg.content[0].text.strip()
+            _explain_cache[cache_key] = text
+            return text
+        except Exception as e:
+            print(f"  [ERROR] anthropic: {e}")
+            return f"⚠️ Claude API 呼び出しエラー: {e}"
+
+    # ── ティッカー文字列を生成 ────────────────────────
+    def _ticker(self, code, market):
+        if market == "jp":
+            return code + ".T"
+        # us (NASDAQ/NYSE) はそのまま
+        return code
+
+    # ── 株価データ取得 ─────────────────────────────────
+    def _fetch_quote(self, code, market="jp"):
+        ticker_str = self._ticker(code, market)
+        try:
+            t    = yf.Ticker(ticker_str)
+            info = t.info
+
+            try:
+                fi     = t.fast_info
+                price  = fi.last_price
+                high52 = fi.year_high
+                low52  = fi.year_low
+                cap    = fi.market_cap
+            except Exception:
+                price  = info.get("regularMarketPrice") or info.get("currentPrice")
+                high52 = info.get("fiftyTwoWeekHigh")
+                low52  = info.get("fiftyTwoWeekLow")
+                cap    = info.get("marketCap")
+
+            prev   = info.get("regularMarketPreviousClose") or info.get("previousClose")
+            change = (price - prev)        if (price and prev) else None
+            chgpct = (change / prev * 100) if (change and prev) else None
+
+            currency = "USD" if market == "us" else "JPY"
+            return {
+                "shortName":                  info.get("shortName") or info.get("longName") or code,
+                "longName":                   info.get("longName") or code,
+                "regularMarketPrice":         price,
+                "regularMarketChange":        change,
+                "regularMarketChangePercent": chgpct,
+                "fiftyTwoWeekHigh":           high52,
+                "fiftyTwoWeekLow":            low52,
+                "marketCap":                  cap,
+                "trailingPE":                 info.get("trailingPE"),
+                "priceToBook":                info.get("priceToBook"),
+                "dividendYield":              info.get("dividendYield"),
+                "revenueGrowth":              info.get("revenueGrowth"),
+                "grossMargins":               info.get("grossMargins"),
+                "regularMarketVolume":        info.get("regularMarketVolume") or info.get("volume"),
+                "sector":                     info.get("sector", ""),
+                "industry":                   info.get("industry", ""),
+                "currency":                   currency,
+                "market":                     market,
+            }
+        except Exception as e:
+            print(f"  [ERROR] _fetch_quote {code} ({market}): {e}")
+            return None
+
+    # ── 銘柄ユニバース ────────────────────────────────
+    _UNIVERSE = {
+        "jp": [
+            # 大型優良・配当
+            "7203","7267","8306","8411","8316","9432","9433","8058","8002","8001",
+            "5401","9101","5108","7011","4502","4568","8766","2914","9022","8591",
+            "8309","8308","3382","4901","2801","7832","8804","4183","9020","9202",
+            # テック・精密
+            "6758","9984","7741","8035","6861","6098","6367","6724","6762","6752",
+            "6971","4661","7733","6902","4543","6504","9613","6501","6301","7912",
+            # 中堅優良
+            "4523","4519","7751","6503","7201","4704","4755","7735",
+            # 高成長・10倍候補
+            "4385","6532","3994","4478","3697","4194","3923","4488","4849","7048",
+        ],
+        "us": [
+            # メガテック
+            "AAPL","MSFT","NVDA","AMZN","GOOGL","META","TSLA","AVGO","ORCL","AMD",
+            # 金融
+            "JPM","BAC","GS","MS","V","MA","BRK-B","C","WFC","AXP",
+            # ヘルスケア・生活必需品
+            "JNJ","PG","KO","MCD","WMT","ABBV","MRK","PFE","LLY","UNH",
+            # エネルギー・素材
+            "XOM","CVX","COP","SLB","FCX",
+            # 通信・配当
+            "T","VZ","INTC","IBM","MO",
+            # その他優良
+            "HD","LOW","CAT","BA","GE","QCOM","TXN","CSCO","ADBE","CRM",
+            # 高成長・10倍候補
+            "PLTR","CRWD","NET","DDOG","SNOW","S","ZS","MDB","GTLB","BILL",
+        ],
+    }
+
+    def _score_stock(self, info, category="other"):
+        """0〜100点でスコアリング（calcSignal のPython移植）"""
+        per   = info.get("trailingPE")
+        pbr   = info.get("priceToBook")
+        div   = info.get("dividendYield")
+        price = info.get("regularMarketPrice") or 0
+        high52 = info.get("fiftyTwoWeekHigh") or 0
+        low52  = info.get("fiftyTwoWeekLow")  or 0
+        mkt    = info.get("market", "jp")
+        is_growth = category in ("tech", "ai") or mkt == "us"
+
+        scores = {}
+
+        if per and 0 < per < 500:
+            t = [15,22,30,45,65] if is_growth else [10,15,20,28,40]
+            scores["per"] = 25 if per<t[0] else 20 if per<t[1] else 13 if per<t[2] else 7 if per<t[3] else 2 if per<t[4] else 0
+
+        if pbr and pbr > 0:
+            scores["pbr"] = 25 if pbr<1 else 20 if pbr<1.5 else 13 if pbr<2 else 7 if pbr<3 else 2 if pbr<5 else 0
+
+        div_pct = (div * 100) if div else -1
+        scores["div"] = (25 if div_pct>=4 else 20 if div_pct>=3 else 13 if div_pct>=2 else 7 if div_pct>=1 else 2) if div_pct >= 0 else 0
+
+        if price and high52 and low52 and high52 > low52:
+            pos = (price - low52) / (high52 - low52) * 100
+            scores["pos"] = 25 if pos<=15 else 20 if pos<=30 else 13 if pos<=45 else 7 if pos<=60 else 2 if pos<=78 else 0
+
+        weights = {
+            "undervalue": {"per":2.0,"pbr":2.0,"div":1.0,"pos":1.0},
+            "dividend":   {"per":1.0,"pbr":1.0,"div":2.5,"pos":1.5},
+            "tech":       {"per":0.5,"pbr":0.5,"div":0.5,"pos":2.5},
+            "ai":         {"per":0.3,"pbr":0.3,"div":0.2,"pos":3.0},
+        }.get(category, {"per":1.0,"pbr":1.0,"div":1.0,"pos":1.0})
+
+        if not scores:
+            return None
+        tw = sum(weights.get(k,1) for k in scores)
+        ws = sum(scores[k]*weights.get(k,1) for k in scores)
+        return round((ws / tw) * 4) if tw > 0 else None
+
+    def _score_tenx(self, info):
+        """10倍候補スコアリング（売上成長40%・時価総額35%・粗利率25%）"""
+        revG = info.get("revenueGrowth")
+        cap  = info.get("marketCap")
+        gm   = info.get("grossMargins")
+        is_us = info.get("market", "jp") == "us"
+
+        scores = {}
+
+        if revG is not None:
+            scores["revG"] = (25 if revG >= 0.5 else 20 if revG >= 0.3 else
+                              13 if revG >= 0.15 else 7 if revG >= 0.05 else
+                              2  if revG >= 0    else 0)
+
+        if cap is not None:
+            # 小型ほど成長余地あり → 小さいほど高スコア
+            t = [5e8, 2e9, 1e10, 5e10] if is_us else [5e10, 2e11, 1e12, 5e12]
+            scores["cap"] = (25 if cap < t[0] else 20 if cap < t[1] else
+                             13 if cap < t[2] else 7  if cap < t[3] else 2)
+
+        if gm is not None:
+            scores["gm"] = (25 if gm >= 0.7 else 20 if gm >= 0.5 else
+                            13 if gm >= 0.3 else 7  if gm >= 0.15 else
+                            2  if gm >= 0   else 0)
+
+        weights = {"revG": 1.6, "cap": 1.4, "gm": 1.0}
+        if not scores:
+            return None
+        tw = sum(weights.get(k, 1) for k in scores)
+        ws = sum(scores[k] * weights.get(k, 1) for k in scores)
+        return round((ws / tw) * 4) if tw > 0 else None
+
+    def _screen_stocks(self, market="jp", category="other", exclude=None):
+        """ユニバースからスクリーニングして上位銘柄を返す"""
+        import concurrent.futures
+        exclude = set(exclude or [])
+        universe = [c for c in self._UNIVERSE.get(market, []) if c not in exclude]
+
+        results = []
+
+        def fetch_one(code):
+            info = self._fetch_quote(code, market)
+            return code, info
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+            for code, info in ex.map(fetch_one, universe):
+                if not info:
+                    continue
+                if category == "tenx":
+                    score = self._score_tenx(info)
+                else:
+                    score = self._score_stock(info, category)
+                if score is None:
+                    continue
+                results.append({
+                    "code":          code,
+                    "name":          info.get("shortName") or code,
+                    "price":         info.get("regularMarketPrice"),
+                    "chgpct":        info.get("regularMarketChangePercent"),
+                    "per":           info.get("trailingPE"),
+                    "pbr":           info.get("priceToBook"),
+                    "div":           info.get("dividendYield"),
+                    "high52":        info.get("fiftyTwoWeekHigh"),
+                    "low52":         info.get("fiftyTwoWeekLow"),
+                    "cap":           info.get("marketCap"),
+                    "revenueGrowth": info.get("revenueGrowth"),
+                    "grossMargins":  info.get("grossMargins"),
+                    "market":        market,
+                    "score":         score,
+                })
+
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return results[:12]
+
+    # ── 関連銘柄取得 ──────────────────────────────────
+    def _fetch_related(self, code, market="jp"):
+        ticker_str = self._ticker(code, market)
+        result = []
+
+        # 1) Yahoo Finance の recommendationsbysymbol API
+        try:
+            url  = f"https://query2.finance.yahoo.com/v6/finance/recommendationsbysymbol/{ticker_str}"
+            resp = req_lib.get(url, headers=HEADERS, timeout=10)
+            data = resp.json()
+            symbols = data["finance"]["result"][0]["recommendedSymbols"]
+            for s in symbols:
+                sym = s.get("symbol", "")
+                # 同じ市場の銘柄だけ返す
+                if market == "jp" and sym.endswith(".T"):
+                    rel_code = sym[:-2]
+                elif market == "us" and not sym.endswith(".T") and "." not in sym:
+                    rel_code = sym
+                else:
+                    continue
+                info = self._fetch_quote(rel_code, market)
+                result.append({
+                    "code":   rel_code,
+                    "name":   info["shortName"] if info else rel_code,
+                    "price":  info["regularMarketPrice"] if info else None,
+                    "chgpct": info["regularMarketChangePercent"] if info else None,
+                    "per":    info["trailingPE"] if info else None,
+                    "pbr":    info["priceToBook"] if info else None,
+                    "div":    info["dividendYield"] if info else None,
+                    "market": market,
+                    "score":  round(s.get("score", 0), 3),
+                })
+        except Exception as e:
+            print(f"  [WARN] recommendationsbysymbol failed for {ticker_str}: {e}")
+
+        # 2) 0件の場合はメッセージのみ返す
+        if not result:
+            result = [{"code": None, "name": None,
+                       "message": "自動提案が見つかりませんでした。手動でコードを入力してください。"}]
+
+        return result
+
+    # ── レスポンス送信ヘルパー ─────────────────────────
+    def _send_json(self, data, status=200):
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_file(self, filename, content_type):
+        filepath = os.path.join(HERE, filename)
+        try:
+            with open(filepath, "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except FileNotFoundError:
+            self._send_json({"error": f"{filename} not found"}, 404)
+
+    def log_message(self, fmt, *args):
+        print(f"  {self.address_string()} -> {fmt % args}")
+
+
+if __name__ == "__main__":
+    print("=" * 48)
+    print("  Stock Watchlist Server")
+    print(f"  Open http://localhost:{PORT} in your browser")
+    print("  Press Ctrl+C to stop")
+    print("=" * 48)
+
+    import threading, webbrowser
+    def _open():
+        import time; time.sleep(1.0)
+        webbrowser.open(f"http://localhost:{PORT}")
+    threading.Thread(target=_open, daemon=True).start()
+
+    server = HTTPServer(("127.0.0.1", PORT), StockHandler)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nServer stopped.")

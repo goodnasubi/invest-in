@@ -1,0 +1,31 @@
+[
+  {
+    "code": "7203",
+    "market": "jp",
+    "category": "dividend",
+    "target": "2800",
+    "memo": "配当利回り3%超で長期保有候補",
+    "related": [
+      { "code": "7267", "market": "jp" },
+      { "code": "7201", "market": "jp" }
+    ]
+  },
+  {
+    "code": "NVDA",
+    "market": "us",
+    "category": "ai",
+    "target": "120",
+    "memo": "AI半導体の本命",
+    "related": [
+      { "code": "AMD",  "market": "us" },
+      { "code": "AVGO", "market": "us" }
+    ]
+  },
+  {
+    "code": "4385",
+    "market": "jp",
+    "category": "tenx",
+    "target": "",
+    "memo": "メルカリ／海外展開で再成長期待"
+  }
+]

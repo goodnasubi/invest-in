@@ -1,0 +1,33 @@
+# ── ユーザー個人データ ───────────────────────
+watchlist.json
+
+# ── 環境変数・APIキー ────────────────────────
+.env
+.env.local
+*.key
+secrets.json
+
+# ── Python ─────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# ── IDE / OS ───────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── ログ・一時ファイル ────────────────────────
+*.log
+*.tmp
+*.bak
