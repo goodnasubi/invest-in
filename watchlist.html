@@ -196,7 +196,28 @@
       position: relative;
     }
     .brief-highlight::before { content: '•'; position: absolute; left: 0; color: var(--accent); }
-    .brief-hot-stocks { display: flex; gap: 8px; flex-wrap: wrap; }
+    .brief-hot-stocks {
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .brief-hot-item {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 0.82rem;
+      transition: border-color 0.15s;
+    }
+    .brief-hot-item:hover { border-color: var(--accent); }
+    .brief-hot-item .hot-name {
+      font-weight: 700; color: var(--text); margin-bottom: 3px;
+    }
+    .brief-hot-item .hot-code {
+      color: var(--text3); font-size: 0.74rem; font-weight: 400; margin-left: 4px;
+    }
+    .brief-hot-item .hot-reason {
+      color: var(--text2); line-height: 1.5; font-size: 0.79rem;
+    }
+    /* 旧形式（テーマのみ等）のチップ表示を残す互換 */
     .brief-hot-chip {
       background: var(--bg3);
       border: 1px solid var(--border);
@@ -2747,9 +2768,15 @@ function renderBriefBody(d) {
     `<div class="brief-highlight">${h}</div>`
   ).join('');
 
-  const hotHtml = (d.hot_stocks || []).map(s =>
-    `<div class="brief-hot-chip" title="${s.reason || ''}">${s.name || s.code}</div>`
-  ).join('');
+  const hotHtml = (d.hot_stocks || []).map(s => {
+    const name = s.name || s.code || '';
+    const code = s.code ? `<span class="hot-code">（${s.code}）</span>` : '';
+    const reason = s.reason ? `<div class="hot-reason">${s.reason}</div>` : '';
+    return `<div class="brief-hot-item">
+      <div class="hot-name">${name}${code}</div>
+      ${reason}
+    </div>`;
+  }).join('');
 
   return `
     <div class="brief-indices">${indicesHtml}</div>

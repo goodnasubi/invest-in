@@ -346,6 +346,79 @@ class StockHandler(BaseHTTPRequestHandler):
             print(f"  [ERROR] anthropic: {e}")
             return f"⚠️ Claude API 呼び出しエラー: {e}"
 
+    def _fetch_jp_movers(self):
+        """主要日本株の前日比を並列取得して値動きランキングを返す。
+        ユニバースは以下を結合・重複排除して構築する（中型・小型成長も含む）:
+          - _UNIVERSE["jp"]                       … 大型・配当・テック・10倍候補の総合
+          - _CATEGORY_UNIVERSE["ai"|"tech"|"tenx"]["jp"]
+          - ユーザーの watchlist.json に登録された日本株
+        速度のため fast_info で価格を取り、上位の銘柄だけ info.shortName で
+        日本語/英語名を解決する（API呼び出し数を抑制）。
+        """
+        import concurrent.futures
+
+        # 1) ユニバースを合成
+        codes = set(self._UNIVERSE.get("jp", []))
+        for cat in ("ai", "tech", "tenx"):
+            codes.update(self._CATEGORY_UNIVERSE.get(cat, {}).get("jp", []))
+        # ウォッチリストの日本株もシードに加える（ユーザー興味）
+        try:
+            if os.path.exists(WATCHLIST_FILE):
+                with open(WATCHLIST_FILE, "r", encoding="utf-8") as f:
+                    for item in json.load(f) or []:
+                        if (item.get("market", "jp") == "jp") and item.get("code"):
+                            codes.add(item["code"].upper())
+        except Exception as e:
+            print(f"  [WARN] movers watchlist read: {e}")
+        codes = sorted(codes)
+
+        # 2) fast_info で価格と前日比のみ取得（軽量）
+        def fetch_pct(code):
+            try:
+                t  = yf.Ticker(code + ".T")
+                fi = t.fast_info
+                price  = self._num(fi.last_price)
+                prev   = self._num(fi.previous_close)
+                chgpct = ((price - prev) / prev * 100) if (price and prev) else None
+                return {
+                    "code":   code,
+                    "name":   None,
+                    "price":  round(price,  2) if price  is not None else None,
+                    "chgpct": round(chgpct, 2) if chgpct is not None else None,
+                }
+            except Exception:
+                return {"code": code, "name": None, "price": None, "chgpct": None}
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=12) as ex:
+            results = list(ex.map(fetch_pct, codes))
+        results = [r for r in results if r["chgpct"] is not None]
+
+        # 3) 値動き上位15＋下位15だけ shortName を解決（API節約）
+        results.sort(key=lambda r: r["chgpct"])
+        targets = (results[:15] + results[-15:])
+        seen_codes = {r["code"] for r in targets}
+
+        def fetch_name(code):
+            try:
+                t = yf.Ticker(code + ".T")
+                info = t.info or {}
+                return code, (info.get("longName") or info.get("shortName") or code)
+            except Exception:
+                return code, code
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+            for code, name in ex.map(fetch_name, seen_codes):
+                for r in results:
+                    if r["code"] == code:
+                        r["name"] = name
+
+        # 名前が取れなかった残りはコードをそのまま使用
+        for r in results:
+            if not r["name"]:
+                r["name"] = r["code"]
+
+        return results
+
     # ── マーケットブリーフィング生成 ─────────────────────
     def _fetch_market_brief(self):
         """yfinanceで主要指数・為替を取得し market_brief.json を生成・返す。
@@ -396,6 +469,10 @@ class StockHandler(BaseHTTPRequestHandler):
         news_items = self._fetch_news("", "jp")
         highlights = [n["title"] for n in news_items[:5]]
 
+        # 主要な日本株の前日比を並列取得し、値動きが大きい銘柄を抽出
+        # （Claudeに具体的な銘柄を挙げてもらうための実データ）
+        movers = self._fetch_jp_movers()
+
         brief = {
             "generated_at": now_jst,
             "available":    True,
@@ -431,19 +508,58 @@ class StockHandler(BaseHTTPRequestHandler):
                 )
                 hl_text = "\n".join(f"{i+1}. {h}" for i, h in enumerate(highlights[:5])) \
                           or "（ニュース取得なし）"
-                prompt = (
-                    "以下のマーケットデータを元に、次の3つを日本語で生成してください。\n"
-                    "- sentiment: マーケットの雰囲気を20文字以内の一言で\n"
-                    "- news_summary: ニュース全体を2〜3文で要約\n"
-                    "- highlights_jp: 各ニュースを15〜30文字の日本語見出しに要約した配列"
-                    "（入力ニュースと同じ件数・同じ順序で返すこと）\n\n"
-                    "出力は次の形式のJSONのみ。他の文字は一切含めないこと:\n"
-                    '{"sentiment": "...", "news_summary": "...", "highlights_jp": ["...", "..."]}\n\n'
-                    f"指数: {idx_text}\nニュース:\n{hl_text}"
-                )
+                # 主要日本株の値動き上位/下位をテキスト化（中型・小型成長も含む）
+                gainers = sorted(movers, key=lambda m: m["chgpct"] or -999, reverse=True)[:10]
+                losers  = sorted(movers, key=lambda m: m["chgpct"] or  999)[:10]
+                def _mv(m):
+                    c = m["chgpct"]
+                    return f"・{m['name']}（{m['code']}）: {c:+.2f}%" if c is not None else f"・{m['name']}（{m['code']}）"
+                gainers_text = "\n".join(_mv(m) for m in gainers) or "（データなし）"
+                losers_text  = "\n".join(_mv(m) for m in losers)  or "（データなし）"
+
+                prompt = f"""あなたは日本株投資家向けの朝刊ブリーフィングを書くアナリストです。
+以下のマーケットデータと値動きを元に、日本語のJSONを生成してください。
+
+【指数】
+{idx_text}
+
+【主要ニュース】
+{hl_text}
+
+【本日の主要日本株の値上がり率上位】
+{gainers_text}
+
+【本日の主要日本株の値下がり率上位】
+{losers_text}
+
+次の4項目を生成してください:
+
+1. **sentiment**: マーケットの雰囲気を20文字以内の一言で。
+
+2. **news_summary**: ニュース全体を2〜3文で日本語要約。
+
+3. **highlights_jp**: 各ニュースを15〜30文字の日本語見出しに要約した配列。
+   入力ニュースと同じ件数・同じ順序で返すこと。
+
+4. **hot_stocks**: 朝刊ブリーフィング形式で「本日注目すべき個別銘柄・テーマ」を**4〜5件**、配列で生成。
+   重要ルール:
+   - **必ず個別銘柄を中心に挙げる**（「セクター全体」のような抽象表現は禁止）
+   - 上記の値動きデータから具体的な銘柄を最低3つは選ぶ
+   - 各エントリは次の形式:
+     {{"name": "銘柄名", "code": "銘柄コード（4桁数字 or 英字ティッカー）", "reason": "30〜80文字の投資コメント"}}
+   - reasonには次のいずれかを含める:
+     * 具体的な前日比（例: 「前日-7.5%急落後の自律反発に注目」）
+     * 事業/テーマ（例: 「半導体装置最大手」「Arm連動・AI投資テーマ」）
+     * 関連イベント（例: 「SpaceX上場を前に関連銘柄への先回り買い」）
+   - テーマ銘柄を1件まで混ぜてもよい（例: name="宇宙・衛星テーマ（ispace等）", code=""）
+
+【出力形式】
+他の文字は一切含めず、次のJSONのみを返すこと:
+{{"sentiment": "...", "news_summary": "...", "highlights_jp": ["...", "..."], "hot_stocks": [{{"name": "...", "code": "...", "reason": "..."}}]}}"""
+
                 msg = client.messages.create(
-                    model="claude-haiku-4-5",
-                    max_tokens=600,
+                    model="claude-sonnet-4-5",
+                    max_tokens=1500,
                     messages=[{"role": "user", "content": prompt}],
                 )
                 m = re.search(r'\{.*\}', msg.content[0].text, re.DOTALL)
@@ -452,12 +568,23 @@ class StockHandler(BaseHTTPRequestHandler):
                     brief["sentiment"]     = parsed.get("sentiment", "")
                     brief["news_summary"]  = parsed.get("news_summary", "")
                     jp_titles              = parsed.get("highlights_jp") or []
-                    # 日本語版が取れた件数だけ置き換え（順序・件数が合えば元タイトルを丸ごと差し替え）
                     if isinstance(jp_titles, list) and jp_titles:
                         brief["highlights"] = [
                             jp_titles[i] if i < len(jp_titles) and jp_titles[i] else h
                             for i, h in enumerate(highlights)
                         ]
+                    hot = parsed.get("hot_stocks") or []
+                    if isinstance(hot, list):
+                        # 不正なエントリを除外して最大5件まで
+                        brief["hot_stocks"] = [
+                            {
+                                "name":   str(h.get("name",   "")).strip(),
+                                "code":   str(h.get("code",   "")).strip(),
+                                "reason": str(h.get("reason", "")).strip(),
+                            }
+                            for h in hot
+                            if isinstance(h, dict) and h.get("name")
+                        ][:5]
             except Exception as e:
                 print(f"  [WARN] market-brief sentiment gen: {e}")
 
