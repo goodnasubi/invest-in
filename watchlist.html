@@ -656,6 +656,74 @@
     .rc-wl-btn:hover { background: var(--accent); color: #fff; }
     .rc-wl-btn.wl-added { border-color: var(--border); color: var(--text3); background: transparent; cursor: default; }
 
+    /* ── 会社概要パネル ── */
+    .profile-section {
+      background: #11141f;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-top: 8px;
+      padding: 14px 16px;
+      animation: profile-slide 0.25s ease-out;
+    }
+    @keyframes profile-slide {
+      from { opacity: 0; transform: translateY(-4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .profile-section .pf-hdr {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 8px;
+    }
+    .profile-section .pf-name {
+      font-size: 0.95rem; font-weight: 700; color: var(--text);
+    }
+    .profile-section .pf-loading {
+      display: flex; align-items: center; gap: 8px;
+      color: var(--text3); font-size: 0.82rem;
+    }
+    .profile-section .pf-tags {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      margin-bottom: 10px;
+    }
+    .profile-section .pf-tag {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      color: var(--text2);
+      border-radius: 10px;
+      padding: 2px 10px;
+      font-size: 0.72rem;
+    }
+    .profile-section .pf-tag.pf-sector   { color: #60a5fa; border-color: #1e3a5f; }
+    .profile-section .pf-tag.pf-industry { color: #a78bfa; border-color: #2d2060; }
+    .profile-section .pf-summary {
+      font-size: 0.85rem;
+      line-height: 1.7;
+      color: var(--text);
+      white-space: pre-wrap;
+    }
+    .profile-section .pf-summary.pf-en {
+      font-size: 0.78rem;
+      color: var(--text2);
+      max-height: 140px;
+      overflow-y: auto;
+      border-top: 1px dashed var(--border);
+      padding-top: 8px;
+      margin-top: 10px;
+    }
+    .profile-section .pf-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.78rem;
+    }
+    .profile-section .pf-link:hover { text-decoration: underline; }
+    .profile-section .pf-err {
+      color: var(--yellow); font-size: 0.82rem;
+    }
+    .profile-btn.active {
+      background: #1a2540;
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
     /* ── AI解説ボタン＆ポップオーバー ── */
     .explain-btn {
       cursor: pointer;
@@ -1710,7 +1778,10 @@ function renderRelatedPanel(code, panel) {
     <div class="chart-section">
       <div class="chart-toolbar">
         <span class="chart-title" id="chart-title-${code}">📈 読み込み中...</span>
-        <div style="display:flex;align-items:center;gap:8px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <button class="period-btn profile-btn" id="profile-btn-${code}"
+            onclick="toggleProfile('${code}','${parentMk}')"
+            title="会社概要を表示/非表示">🏢 会社概要</button>
           <button class="period-btn" id="rccbtn-${code}-${code}"
             onclick="switchChart('${code}','${code}','${parentMk}')"
             title="本銘柄のチャートに戻る"
@@ -1723,6 +1794,7 @@ function renderRelatedPanel(code, panel) {
       </div>
       <div class="chart-resize-handle" onmousedown="startChartResize(event,'${code}')" title="ドラッグで高さを変更"></div>
     </div>
+    <div class="profile-section" id="profile-section-${code}" style="display:none"></div>
     <div class="related-panel-header" style="margin-top:12px">
       <span>🔗 関連銘柄（${related.length}件登録済み）</span>
     </div>
@@ -2270,6 +2342,92 @@ function buildRankBadge(rank) {
   if (rank === 2) return `<span class="rank-badge rank-2" title="スコア2位">2</span>`;
   if (rank === 3) return `<span class="rank-badge rank-3" title="スコア3位">3</span>`;
   return `<span class="rank-badge rank-n" title="スコア${rank}位">${rank}</span>`;
+}
+
+// ────────────────────────────────────────
+//  会社概要パネル（普段は隠して、ボタンで開閉）
+// ────────────────────────────────────────
+const _profileCache = {};   // { "code|market": data }
+
+async function toggleProfile(code, market) {
+  const sec = document.getElementById(`profile-section-${code}`);
+  const btn = document.getElementById(`profile-btn-${code}`);
+  if (!sec) return;
+
+  // 開いていたら閉じる
+  if (sec.style.display !== 'none') {
+    sec.style.display = 'none';
+    btn?.classList.remove('active');
+    return;
+  }
+
+  // 開く
+  sec.style.display = '';
+  btn?.classList.add('active');
+
+  // 既に取得済みなら再描画不要
+  if (sec.dataset.loaded === '1') return;
+
+  // ローディング表示
+  sec.innerHTML = `<div class="pf-loading"><span class="spinner"></span>会社概要を取得中…</div>`;
+
+  // キャッシュチェック
+  const ck = `${code}|${market}`;
+  if (_profileCache[ck]) {
+    sec.innerHTML = buildProfileHtml(_profileCache[ck]);
+    sec.dataset.loaded = '1';
+    return;
+  }
+
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/profile?code=${encodeURIComponent(code)}&market=${market}`,
+      { signal: AbortSignal.timeout(25000) }
+    );
+    const data = await res.json();
+    _profileCache[ck] = data;
+    sec.innerHTML = buildProfileHtml(data);
+    sec.dataset.loaded = '1';
+  } catch (e) {
+    sec.innerHTML = `<div class="pf-err">⚠️ 会社概要の取得に失敗しました: ${e.message}</div>`;
+  }
+}
+
+function buildProfileHtml(d) {
+  if (!d || !d.available) {
+    return `<div class="pf-err">⚠️ 会社情報を取得できませんでした${d?.error ? `（${d.error}）` : ''}</div>`;
+  }
+
+  const tags = [];
+  if (d.sector)   tags.push(`<span class="pf-tag pf-sector">${d.sector}</span>`);
+  if (d.industry) tags.push(`<span class="pf-tag pf-industry">${d.industry}</span>`);
+  if (typeof d.employees === 'number')
+    tags.push(`<span class="pf-tag">👥 ${d.employees.toLocaleString('ja-JP')}人</span>`);
+  if (d.founded)  tags.push(`<span class="pf-tag">📅 ${d.founded}年設立</span>`);
+  if (d.city || d.country) {
+    tags.push(`<span class="pf-tag">📍 ${[d.city, d.country].filter(Boolean).join(', ')}</span>`);
+  }
+  if (d.website) {
+    tags.push(`<a href="${d.website}" target="_blank" rel="noopener" class="pf-link">🔗 公式サイト</a>`);
+  }
+
+  const summaryJp = d.summary_jp ? `<div class="pf-summary">${d.summary_jp}</div>` : '';
+  const summaryEn = d.summary
+    ? `<details><summary style="cursor:pointer;font-size:0.72rem;color:var(--text3);margin-top:8px">原文（英語）を表示</summary>
+       <div class="pf-summary pf-en">${d.summary}</div></details>`
+    : '';
+  const noSummary = (!summaryJp && !summaryEn)
+    ? `<div style="color:var(--text3);font-size:0.82rem">事業内容の情報がありません</div>` : '';
+
+  return `
+    <div class="pf-hdr">
+      <span class="pf-name">🏢 ${d.name}</span>
+    </div>
+    ${tags.length ? `<div class="pf-tags">${tags.join('')}</div>` : ''}
+    ${summaryJp}
+    ${summaryEn}
+    ${noSummary}
+  `;
 }
 
 // ────────────────────────────────────────

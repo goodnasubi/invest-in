@@ -48,6 +48,9 @@ def _get_anthropic():
 # 解説のサーバー側キャッシュ（コード+カテゴリ+スコアでキー）
 _explain_cache = {}
 
+# 会社概要のサーバー側キャッシュ（コード+市場でキー）
+_profile_cache = {}
+
 
 class StockHandler(BaseHTTPRequestHandler):
 
@@ -92,6 +95,18 @@ class StockHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": f"Failed to fetch {code}"}, 500)
             else:
                 self._send_json(data)
+            return
+
+        # ── 会社概要 /api/profile?code=7203&market=jp ──────────
+        if path == "/api/profile":
+            params = parse_qs(parsed.query)
+            code   = params.get("code",   [""])[0].strip().upper()
+            market = params.get("market", ["jp"])[0].strip().lower()
+            if not code:
+                self._send_json({"error": "code parameter required"}, 400)
+                return
+            data = self._fetch_profile(code, market)
+            self._send_json(data)
             return
 
         # ── ニュース取得 /api/news?market=jp&code=7203 ──────────
@@ -454,6 +469,69 @@ class StockHandler(BaseHTTPRequestHandler):
             print(f"  [WARN] market_brief.json save failed: {e}")
 
         return brief
+
+    # ── 会社概要取得 ──────────────────────────────────
+    def _fetch_profile(self, code, market="jp"):
+        """会社概要（事業内容・セクター・従業員数など）を取得。
+        日本企業は yfinance の英語要約を Claude で日本語に翻訳・要約する。
+        結果は in-memory にキャッシュ（プロセス再起動でクリア）。
+        """
+        cache_key = f"{code}|{market}"
+        if cache_key in _profile_cache:
+            return _profile_cache[cache_key]
+
+        ticker_str = self._ticker(code, market)
+        try:
+            t    = yf.Ticker(ticker_str)
+            info = t.info or {}
+        except Exception as e:
+            print(f"  [ERROR] _fetch_profile {code}: {e}")
+            return {"available": False, "error": str(e)}
+
+        summary = info.get("longBusinessSummary") or ""
+        profile = {
+            "available":   True,
+            "name":        info.get("longName") or info.get("shortName") or code,
+            "sector":      info.get("sector", "") or "",
+            "industry":    info.get("industry", "") or "",
+            "summary":     summary,
+            "summary_jp":  "",
+            "website":     info.get("website", "") or "",
+            "employees":   info.get("fullTimeEmployees"),
+            "country":     info.get("country", "") or "",
+            "city":        info.get("city", "") or "",
+            "founded":     info.get("yearFounded") if isinstance(info.get("yearFounded"), int) else None,
+            "exchange":    info.get("exchange", "") or "",
+            "currency":    "USD" if market == "us" else "JPY",
+            "market":      market,
+        }
+
+        # 日本企業（または英文要約のある銘柄）は Claude で日本語要約を生成
+        if summary and (market == "jp" or len(summary) > 200):
+            client = _get_anthropic()
+            if client:
+                try:
+                    prompt = (
+                        f"次の{'日本' if market == 'jp' else ''}企業の事業内容を、"
+                        "日本語で180〜260文字程度に要約してください。"
+                        "主力事業・強み・特徴が分かるように、投資判断の補助情報として書いてください。\n"
+                        "前置きや見出しは不要。要約本文のみ返してください。\n\n"
+                        f"会社名: {profile['name']}\n"
+                        f"セクター: {profile['sector']}\n"
+                        f"業界: {profile['industry']}\n\n"
+                        f"原文（英語）:\n{summary[:1800]}"
+                    )
+                    msg = client.messages.create(
+                        model="claude-haiku-4-5",
+                        max_tokens=500,
+                        messages=[{"role": "user", "content": prompt}],
+                    )
+                    profile["summary_jp"] = msg.content[0].text.strip()
+                except Exception as e:
+                    print(f"  [WARN] profile JP summary {code}: {e}")
+
+        _profile_cache[cache_key] = profile
+        return profile
 
     # ── ニュース取得 ──────────────────────────────────
     def _fetch_news(self, code="", market="jp"):
