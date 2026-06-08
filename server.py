@@ -15,14 +15,17 @@ Environment variables:
 
 import json
 import os
+import time
 import requests as req_lib
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 import yfinance as yf
 
-PORT           = 5000
-HERE           = os.path.dirname(os.path.abspath(__file__))
-WATCHLIST_FILE = os.path.join(HERE, "watchlist.json")
+PORT               = 5000
+HERE               = os.path.dirname(os.path.abspath(__file__))
+WATCHLIST_FILE     = os.path.join(HERE, "watchlist.json")
+MARKET_BRIEF_FILE  = os.path.join(HERE, "market_brief.json")
+MARKET_BRIEF_TTL   = 8 * 3600  # 8時間でキャッシュ切れ（秒）
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
@@ -89,6 +92,36 @@ class StockHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": f"Failed to fetch {code}"}, 500)
             else:
                 self._send_json(data)
+            return
+
+        # ── ニュース取得 /api/news?market=jp&code=7203 ──────────
+        if path == "/api/news":
+            params = parse_qs(parsed.query)
+            market = params.get("market", ["jp"])[0].strip().lower()
+            code   = params.get("code",   [""])[0].strip().upper()
+            data   = self._fetch_news(code, market)
+            self._send_json(data)
+            return
+
+        # ── マーケットブリーフィング /api/market-brief ────────
+        # ?refresh=1 で強制再取得、それ以外はキャッシュ（8時間）を使用
+        if path == "/api/market-brief":
+            params = parse_qs(parsed.query)
+            force  = params.get("refresh", [""])[0] == "1"
+            if not force and os.path.exists(MARKET_BRIEF_FILE):
+                try:
+                    if time.time() - os.path.getmtime(MARKET_BRIEF_FILE) < MARKET_BRIEF_TTL:
+                        with open(MARKET_BRIEF_FILE, "r", encoding="utf-8") as f:
+                            self._send_json(json.load(f))
+                        return
+                except Exception:
+                    pass
+            try:
+                brief = self._fetch_market_brief()
+                self._send_json(brief)
+            except Exception as e:
+                print(f"  [ERROR] market-brief: {e}")
+                self._send_json({"available": False, "error": str(e)}, 500)
             return
 
         # ── ヒストリカルデータ /api/history?code=7203&market=jp&period=6mo ─
@@ -208,9 +241,10 @@ class StockHandler(BaseHTTPRequestHandler):
         if client is None:
             return None
 
-        code     = body.get("code", "")
-        name     = body.get("name", code)
-        category = body.get("category", "other")
+        code         = body.get("code", "")
+        name         = body.get("name", code)
+        category     = body.get("category", "other")
+        news_context = body.get("newsContext", "")  # 市場ニュースのサマリー（任意）
         score    = body.get("score")
         detail   = body.get("detail", {}) or {}
         price    = body.get("price")
@@ -260,6 +294,8 @@ class StockHandler(BaseHTTPRequestHandler):
         if price is not None:
             price_str = f"${price:.2f}" if currency == "USD" else f"{price:,.1f}円"
 
+        news_section = f"\n【本日のマーケットニュース】\n{news_context}\n" if news_context else ""
+
         prompt = f"""以下は株式の買いタイミング判定結果です。スコアの根拠と注目ポイントを、日本語の口語で**3行以内**で簡潔に説明してください。
 
 【絶対ルール】
@@ -276,12 +312,11 @@ class StockHandler(BaseHTTPRequestHandler):
 {chr(10).join(metric_lines) or "（データ不足）"}
 
 【スコア内訳（25点満点）】
-{chr(10).join(detail_lines) or "（なし）"}
-
+{chr(10).join(detail_lines) or "（なし）"}{news_section}
 3行以内で：
 1行目：この銘柄の現状を一言で
-2行目：スコアの主な根拠（高/低い要因）
-3行目：このカテゴリの観点での買い時の判断（"様子見" / "押し目待ち" / "良い買い場" など）"""
+2行目：スコアの主な根拠（高/低い要因）{"＋今日のニュースとの関連があれば言及" if news_context else ""}
+3行目：このカテゴリ・NISA長期投資の観点での買い場判断（"様子見" / "押し目待ち" / "良い買い場" など）"""
 
         try:
             msg = client.messages.create(
@@ -295,6 +330,162 @@ class StockHandler(BaseHTTPRequestHandler):
         except Exception as e:
             print(f"  [ERROR] anthropic: {e}")
             return f"⚠️ Claude API 呼び出しエラー: {e}"
+
+    # ── マーケットブリーフィング生成 ─────────────────────
+    def _fetch_market_brief(self):
+        """yfinanceで主要指数・為替を取得し market_brief.json を生成・返す。
+        Coworkスケジュールタスクに依存せず、サーバー自身がデータを取得する。
+        結果は MARKET_BRIEF_FILE にキャッシュされ TTL 内は再取得しない。
+        """
+        import datetime
+        import re
+
+        now_jst = datetime.datetime.now(
+            datetime.timezone(datetime.timedelta(hours=9))
+        ).strftime("%Y-%m-%d %H:%M（JST）")
+
+        def get_index(ticker_str):
+            try:
+                t     = yf.Ticker(ticker_str)
+                fi    = t.fast_info
+                price = self._num(fi.last_price)
+                prev  = self._num(fi.previous_close)
+                chg   = ((price - prev) / prev * 100) if (price and prev) else None
+                return {
+                    "value":      round(price, 2) if price is not None else None,
+                    "change_pct": round(chg,   2) if chg   is not None else None,
+                }
+            except Exception as e:
+                print(f"  [WARN] market-brief index {ticker_str}: {e}")
+                return {"value": None, "change_pct": None}
+
+        def get_fx(ticker_str):
+            try:
+                t  = yf.Ticker(ticker_str)
+                fi = t.fast_info
+                v  = self._num(fi.last_price)
+                return round(v, 2) if v is not None else None
+            except Exception as e:
+                print(f"  [WARN] market-brief fx {ticker_str}: {e}")
+                return None
+
+        print("  [INFO] Fetching market brief from yfinance...")
+        nikkei = get_index("^N225")
+        topix  = get_index("^TOPIX")
+        dow    = get_index("^DJI")
+        sp500  = get_index("^GSPC")
+        nasdaq = get_index("^IXIC")
+        usdjpy = get_fx("JPY=X")
+        eurjpy = get_fx("EURJPY=X")
+
+        news_items = self._fetch_news("", "jp")
+        highlights = [n["title"] for n in news_items[:5]]
+
+        brief = {
+            "generated_at": now_jst,
+            "available":    True,
+            "indices": {
+                "nikkei": nikkei,
+                "topix":  topix,
+                "dow":    dow,
+                "sp500":  sp500,
+                "nasdaq": nasdaq,
+            },
+            "fx": {
+                "usdjpy": usdjpy,
+                "eurjpy": eurjpy,
+            },
+            "highlights":   highlights,
+            "hot_stocks":   [],
+            "sentiment":    "",
+            "news_summary": "",
+        }
+
+        client = _get_anthropic()
+        if client:
+            try:
+                def fmt(d):
+                    v = d.get("value")
+                    c = d.get("change_pct")
+                    return f"{v}({c:+.2f}%)" if (v and c is not None) else "N/A"
+
+                idx_text = (
+                    f"日経平均{fmt(nikkei)}, TOPIX{fmt(topix)}, "
+                    f"ダウ{fmt(dow)}, S&P500{fmt(sp500)}, "
+                    f"ドル円{usdjpy}, ユーロ円{eurjpy}"
+                )
+                hl_text = "\n".join(f"{i+1}. {h}" for i, h in enumerate(highlights[:5])) \
+                          or "（ニュース取得なし）"
+                prompt = (
+                    "以下のマーケットデータを元に、次の3つを日本語で生成してください。\n"
+                    "- sentiment: マーケットの雰囲気を20文字以内の一言で\n"
+                    "- news_summary: ニュース全体を2〜3文で要約\n"
+                    "- highlights_jp: 各ニュースを15〜30文字の日本語見出しに要約した配列"
+                    "（入力ニュースと同じ件数・同じ順序で返すこと）\n\n"
+                    "出力は次の形式のJSONのみ。他の文字は一切含めないこと:\n"
+                    '{"sentiment": "...", "news_summary": "...", "highlights_jp": ["...", "..."]}\n\n'
+                    f"指数: {idx_text}\nニュース:\n{hl_text}"
+                )
+                msg = client.messages.create(
+                    model="claude-haiku-4-5",
+                    max_tokens=600,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                m = re.search(r'\{.*\}', msg.content[0].text, re.DOTALL)
+                if m:
+                    parsed = json.loads(m.group())
+                    brief["sentiment"]     = parsed.get("sentiment", "")
+                    brief["news_summary"]  = parsed.get("news_summary", "")
+                    jp_titles              = parsed.get("highlights_jp") or []
+                    # 日本語版が取れた件数だけ置き換え（順序・件数が合えば元タイトルを丸ごと差し替え）
+                    if isinstance(jp_titles, list) and jp_titles:
+                        brief["highlights"] = [
+                            jp_titles[i] if i < len(jp_titles) and jp_titles[i] else h
+                            for i, h in enumerate(highlights)
+                        ]
+            except Exception as e:
+                print(f"  [WARN] market-brief sentiment gen: {e}")
+
+        try:
+            with open(MARKET_BRIEF_FILE, "w", encoding="utf-8") as f:
+                json.dump(brief, f, ensure_ascii=False, indent=2)
+            print(f"  [INFO] market_brief.json saved -> {MARKET_BRIEF_FILE}")
+        except Exception as e:
+            print(f"  [WARN] market_brief.json save failed: {e}")
+
+        return brief
+
+    # ── ニュース取得 ──────────────────────────────────
+    def _fetch_news(self, code="", market="jp"):
+        """yfinanceで日経225・指定銘柄のニュースを取得"""
+        results = []
+        tickers = ["^N225", "^GSPC"] if market == "jp" else ["^GSPC", "^DJI"]
+        if code:
+            tickers.insert(0, self._ticker(code, market))
+
+        seen = set()
+        for ticker_str in tickers:
+            try:
+                t = yf.Ticker(ticker_str)
+                news = t.news or []
+                for item in news[:8]:
+                    content = item.get("content", {})
+                    title = content.get("title") or item.get("title", "")
+                    url   = content.get("canonicalUrl", {}).get("url") or item.get("link", "")
+                    pub   = content.get("pubDate") or content.get("displayTime") or ""
+                    if not title or title in seen:
+                        continue
+                    seen.add(title)
+                    results.append({
+                        "title":     title,
+                        "url":       url,
+                        "published": pub,
+                        "source":    ticker_str,
+                    })
+            except Exception as e:
+                print(f"  [WARN] news fetch {ticker_str}: {e}")
+
+        return results[:12]
 
     # ── ティッカー文字列を生成 ────────────────────────
     def _ticker(self, code, market):

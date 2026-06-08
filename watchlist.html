@@ -138,6 +138,77 @@
     .stat-card .label { font-size: 0.72rem; color: var(--text3); margin-bottom: 4px; }
     .stat-card .value { font-size: 1.2rem; font-weight: 700; }
 
+
+    /* ── Market Brief Panel ── */
+    .brief-panel {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px 20px;
+      margin-bottom: 16px;
+    }
+    .brief-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+    }
+    .brief-title {
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: var(--text2);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .brief-meta { font-size: 0.75rem; color: var(--text3); }
+    .brief-body { margin-top: 14px; }
+    .brief-indices {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .brief-idx {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 14px;
+      min-width: 110px;
+    }
+    .brief-idx .idx-label { font-size: 0.7rem; color: var(--text3); margin-bottom: 2px; }
+    .brief-idx .idx-val   { font-size: 1rem; font-weight: 700; }
+    .brief-idx .idx-chg   { font-size: 0.75rem; }
+    .brief-section { margin-bottom: 10px; }
+    .brief-section-label {
+      font-size: 0.72rem;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 6px;
+    }
+    .brief-highlights { display: flex; flex-direction: column; gap: 4px; }
+    .brief-highlight {
+      font-size: 0.82rem;
+      color: var(--text2);
+      padding-left: 12px;
+      position: relative;
+    }
+    .brief-highlight::before { content: '•'; position: absolute; left: 0; color: var(--accent); }
+    .brief-hot-stocks { display: flex; gap: 8px; flex-wrap: wrap; }
+    .brief-hot-chip {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 3px 12px;
+      font-size: 0.78rem;
+      color: var(--text2);
+    }
+    .brief-hot-chip:hover { border-color: var(--accent); color: var(--text); }
+    .brief-sentiment { font-size: 0.83rem; color: var(--accent); font-style: italic; }
+    .brief-placeholder { font-size: 0.82rem; color: var(--text3); text-align: center; padding: 12px 0; }
+
     /* ── Filter Bar ── */
     .filter-bar {
       display: flex;
@@ -284,6 +355,11 @@
     @keyframes pulse-border {
       0%, 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); }
       50%       { box-shadow: 0 0 0 3px rgba(34,197,94,0.25); }
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 0.55; transform: scale(0.92); }
+      50%       { opacity: 1;    transform: scale(1.15); }
     }
 
     /* メモ・目標価格 */
@@ -652,8 +728,8 @@
   <h1>📈 株式<span>ウォッチリスト</span></h1>
   <div class="header-actions">
     <div style="display:flex;align-items:center;gap:6px">
-      <div id="serverDot" style="width:8px;height:8px;border-radius:50%;background:var(--text3)"></div>
-      <span id="serverLabel" class="updated-at">確認中...</span>
+      <div id="serverDot" style="width:8px;height:8px;border-radius:50%;background:var(--yellow);animation:pulse-dot 1.2s ease-in-out infinite"></div>
+      <span id="serverLabel" class="updated-at">市場情報を取得中…</span>
     </div>
     <span class="updated-at" id="updatedAt">未更新</span>
     <div style="display:flex;align-items:center;gap:6px">
@@ -707,6 +783,24 @@
       <input id="memoInput" type="text" placeholder="例: 中期決算後に注目">
     </div>
     <button class="btn btn-primary" onclick="addStock()">追加</button>
+  </div>
+</div>
+
+<!-- マーケットブリーフィングパネル -->
+<div class="brief-panel" id="briefPanel">
+  <div class="brief-header" onclick="toggleBrief()">
+    <div class="brief-title">
+      <span>📰</span>
+      <span>マーケット状況</span>
+      <span id="briefToggleIcon" style="font-size:0.75rem;color:var(--text3)">▼</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <span class="brief-meta" id="briefGeneratedAt">読み込み中...</span>
+      <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();loadMarketBrief()" title="再読み込み">🔄</button>
+    </div>
+  </div>
+  <div class="brief-body" id="briefBody">
+    <div class="brief-placeholder">読み込み中...</div>
   </div>
 </div>
 
@@ -840,6 +934,7 @@ const STORAGE_KEY = 'jp_watchlist_v2';
 //  状態管理
 // ────────────────────────────────────────
 let watchlist     = [];   // init() で非同期ロード
+let marketBrief   = null; // /api/market-brief のキャッシュ
 let stockData     = {};   // { code: yahooData }
 let currentFilter = 'all';
 let sortByScore   = false;
@@ -880,29 +975,80 @@ async function saveToStorage() {
 // ────────────────────────────────────────
 //  サーバー状態管理
 // ────────────────────────────────────────
-let serverOk = false;
+let serverOk     = false;
+let serverState  = 'connecting';   // 'connecting' | 'ok' | 'failed'
+const RETRY_MAX  = 5;              // 最大リトライ回数
 
-async function checkServer() {
+async function _pingHealth(timeoutMs = 3000) {
   try {
-    const res = await fetch(API_BASE + '/health', { signal: AbortSignal.timeout(2000) });
-    serverOk = res.ok;
+    const res = await fetch(API_BASE + '/health', { signal: AbortSignal.timeout(timeoutMs) });
+    return res.ok;
   } catch {
-    serverOk = false;
+    return false;
   }
+}
+
+// サーバー状態を更新（fetchYahooQuote などからも呼ばれる）
+async function checkServer() {
+  const ok    = await _pingHealth(2500);
+  serverOk    = ok;
+  serverState = ok ? 'ok' : 'failed';
   updateServerBanner();
+  return ok;
+}
+
+// 起動時：バックグラウンドでリトライしつつソフトな表示
+async function connectWithRetries() {
+  serverState = 'connecting';
+  serverOk    = false;
+  updateServerBanner();
+
+  for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
+    // 試行ごとに少しずつタイムアウトを伸ばす（起動直後の遅延を許容）
+    const timeoutMs = 2500 + attempt * 1000;
+    const label     = document.getElementById('serverLabel');
+    if (label) label.textContent = `市場情報を取得中… (${attempt}/${RETRY_MAX})`;
+
+    if (await _pingHealth(timeoutMs)) {
+      serverOk    = true;
+      serverState = 'ok';
+      updateServerBanner();
+      return true;
+    }
+
+    // 次の試行までインターバル（最後のループ後は待たない）
+    if (attempt < RETRY_MAX) await new Promise(r => setTimeout(r, 1500));
+  }
+
+  serverOk    = false;
+  serverState = 'failed';
+  updateServerBanner();
+  return false;
 }
 
 function updateServerBanner() {
   const banner = document.getElementById('serverBanner');
   const dot    = document.getElementById('serverDot');
   const label  = document.getElementById('serverLabel');
-  if (serverOk) {
+  if (!banner || !dot || !label) return;
+
+  if (serverState === 'ok') {
     banner.style.display = 'none';
     dot.style.background = 'var(--green)';
+    dot.style.boxShadow  = '';
+    dot.style.animation  = '';
     label.textContent    = 'サーバー接続中';
+  } else if (serverState === 'connecting') {
+    // 接続中は黄色＋脈動アニメーション、バナーは出さない
+    banner.style.display = 'none';
+    dot.style.background = 'var(--yellow)';
+    dot.style.animation  = 'pulse-dot 1.2s ease-in-out infinite';
+    // 文言は connectWithRetries 側でカウンタ表示するためそのまま
   } else {
+    // failed
     banner.style.display = 'flex';
     dot.style.background = 'var(--red)';
+    dot.style.animation  = '';
     label.textContent    = 'サーバー未接続';
   }
 }
@@ -2264,6 +2410,7 @@ async function showExplain(ev, code) {
         revenueGrowth:  d.revenueGrowth,
         grossMargins:   d.grossMargins,
         marketCap:      d.marketCap,
+        newsContext:    marketBrief?.news_summary || '',
       }),
       signal: AbortSignal.timeout(20000),
     });
@@ -2378,6 +2525,92 @@ document.getElementById('codeInput').addEventListener('keydown', e => {
 });
 
 // ────────────────────────────────────────
+//  マーケットブリーフィング
+// ────────────────────────────────────────
+let _briefCollapsed = false;
+
+function toggleBrief() {
+  _briefCollapsed = !_briefCollapsed;
+  document.getElementById('briefBody').style.display = _briefCollapsed ? 'none' : '';
+  document.getElementById('briefToggleIcon').textContent = _briefCollapsed ? '▶' : '▼';
+}
+
+async function loadMarketBrief() {
+  const body = document.getElementById('briefBody');
+  const meta = document.getElementById('briefGeneratedAt');
+  try {
+    const res  = await fetch(`${API_BASE}/api/market-brief`, { signal: AbortSignal.timeout(5000) });
+    const data = await res.json();
+    marketBrief = data;
+
+    if (!data.available) {
+      meta.textContent = '';
+      body.innerHTML = `<div class="brief-placeholder">📭 ${data.message || 'ブリーフィングはまだありません'}</div>`;
+      return;
+    }
+
+    meta.textContent = data.generated_at || '';
+    body.innerHTML = renderBriefBody(data);
+  } catch (e) {
+    meta.textContent = '';
+    body.innerHTML = '<div class="brief-placeholder">⚠️ サーバーに接続できません（start_server.bat を起動してください）</div>';
+  }
+}
+
+function renderBriefBody(d) {
+  const idx = d.indices || {};
+  const fx  = d.fx || {};
+
+  function idxHtml(label, key) {
+    const v = idx[key];
+    if (!v) return '';
+    const chg = v.change_pct;
+    const col = chg == null ? 'var(--text2)' : chg >= 0 ? 'var(--green)' : 'var(--red)';
+    const chgStr = chg == null ? '' : `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%`;
+    const val = v.value != null ? v.value.toLocaleString('ja-JP', { maximumFractionDigits: 2 }) : '—';
+    return `<div class="brief-idx">
+      <div class="idx-label">${label}</div>
+      <div class="idx-val">${val}</div>
+      ${chgStr ? `<div class="idx-chg" style="color:${col}">${chgStr}</div>` : ''}
+    </div>`;
+  }
+
+  const indicesHtml = [
+    idxHtml('日経225', 'nikkei'),
+    idxHtml('TOPIX',   'topix'),
+    idxHtml('NYダウ',  'dow'),
+    idxHtml('S&P500',  'sp500'),
+    idxHtml('NASDAQ',  'nasdaq'),
+    fx.usdjpy ? `<div class="brief-idx"><div class="idx-label">ドル円</div><div class="idx-val">${fx.usdjpy.toFixed(2)}円</div></div>` : '',
+    fx.eurjpy ? `<div class="brief-idx"><div class="idx-label">ユーロ円</div><div class="idx-val">${fx.eurjpy.toFixed(2)}円</div></div>` : '',
+  ].filter(Boolean).join('');
+
+  const highlightsHtml = (d.highlights || []).map(h =>
+    `<div class="brief-highlight">${h}</div>`
+  ).join('');
+
+  const hotHtml = (d.hot_stocks || []).map(s =>
+    `<div class="brief-hot-chip" title="${s.reason || ''}">${s.name || s.code}</div>`
+  ).join('');
+
+  return `
+    <div class="brief-indices">${indicesHtml}</div>
+    ${highlightsHtml ? `<div class="brief-section">
+      <div class="brief-section-label">📌 本日の注目材料</div>
+      <div class="brief-highlights">${highlightsHtml}</div>
+    </div>` : ''}
+    ${hotHtml ? `<div class="brief-section">
+      <div class="brief-section-label">🔥 話題の銘柄</div>
+      <div class="brief-hot-stocks">${hotHtml}</div>
+    </div>` : ''}
+    ${d.sentiment ? `<div class="brief-section">
+      <div class="brief-section-label">💬 センチメント</div>
+      <div class="brief-sentiment">${d.sentiment}</div>
+    </div>` : ''}
+  `;
+}
+
+// ────────────────────────────────────────
 //  初期化
 // ────────────────────────────────────────
 async function init() {
@@ -2385,9 +2618,12 @@ async function init() {
   renderTable();
   updateStats();
 
-  // サーバー状態チェック
-  await checkServer();
-  if (!serverOk) return;
+  // サーバー状態チェック（リトライしながら接続を待つ）
+  const ok = await connectWithRetries();
+  if (!ok) return;
+
+  // ── マーケットブリーフィング読み込み ──────────────
+  loadMarketBrief();
 
   // ── ウォッチリストをサーバーから読み込み ──────────
   watchlist = await loadWatchlist();

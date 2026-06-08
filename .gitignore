@@ -1,6 +1,12 @@
 # ── ユーザー個人データ ───────────────────────
 watchlist.json
 
+# ── サーバー側ランタイムキャッシュ ──────────────
+market_brief.json
+
+# ── Claude Code ローカル設定 ─────────────────
+.claude/settings.local.json
+
 # ── 環境変数・APIキー ────────────────────────
 .env
 .env.local
