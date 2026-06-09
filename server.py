@@ -464,7 +464,10 @@ class StockHandler(BaseHTTPRequestHandler):
 
         print("  [INFO] Fetching market brief from yfinance...")
         nikkei = get_index("^N225")
-        topix  = get_index("^TOPIX")
+        # TOPIX指数(^TOPIX/^TPX)はyfinanceで取得不可。連動ETF(1306.T)で前日比を代用する。
+        # ETFの価格はTOPIX指数値そのものではないため value は出さず、change_pct のみ採用。
+        topix  = get_index("1306.T")
+        topix["value"] = None
         dow    = get_index("^DJI")
         sp500  = get_index("^GSPC")
         nasdaq = get_index("^IXIC")
@@ -504,7 +507,12 @@ class StockHandler(BaseHTTPRequestHandler):
                 def fmt(d):
                     v = d.get("value")
                     c = d.get("change_pct")
-                    return f"{v}({c:+.2f}%)" if (v and c is not None) else "N/A"
+                    if v and c is not None:
+                        return f"{v}({c:+.2f}%)"
+                    # 指数値が取れず前日比のみのケース（TOPIX等）
+                    if c is not None:
+                        return f"前日比{c:+.2f}%"
+                    return "N/A"
 
                 idx_text = (
                     f"日経平均{fmt(nikkei)}, TOPIX{fmt(topix)}, "
@@ -784,7 +792,7 @@ class StockHandler(BaseHTTPRequestHandler):
             "8309","8308","3382","4901","2801","7832","8804","4183","9020","9202",
             # テック・精密
             "6758","9984","7741","8035","6861","6098","6367","6724","6762","6752",
-            "6971","4661","7733","6902","4543","6504","9613","6501","6301","7912",
+            "6971","4661","7733","6902","4543","6504","6702","6501","6301","7912",
             # 中堅優良
             "4523","4519","7751","6503","7201","4704","4755","7735",
             # 高成長・10倍候補
@@ -822,7 +830,7 @@ class StockHandler(BaseHTTPRequestHandler):
                 "7735",  # SCREEN（半導体製造装置）
                 "6963",  # ローム（半導体）
                 "7741",  # HOYA（フォトマスク）
-                "6967",  # 新光電気工業（半導体パッケージ）
+                "4062",  # イビデン（ICパッケージ基板で世界首位）
                 "6273",  # SMC（半導体製造装置部品）
                 "6324",  # ハーモニック・ドライブ
                 "6526",  # ソシオネクスト（カスタムLSI）
@@ -856,7 +864,7 @@ class StockHandler(BaseHTTPRequestHandler):
         "tech": {
             "jp": [
                 "6758","9984","7741","8035","6861","6098","6367","6724","6762","6752",
-                "6971","4661","7733","6902","4543","6504","9613","6501","6301","7912",
+                "6971","4661","7733","6902","4543","6504","6702","6501","6301","7912",
                 "6857","6146","6920","3436","6963",
             ],
             "us": [
