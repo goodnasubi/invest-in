@@ -51,6 +51,11 @@ _explain_cache = {}
 # 会社概要のサーバー側キャッシュ（コード+市場でキー）
 _profile_cache = {}
 
+# スクリーニング結果のサーバー側キャッシュ（市場+カテゴリでキー、30分）
+# 値: (timestamp, scored_list, market_context, market_view)
+_screen_cache = {}
+SCREEN_TTL = 30 * 60
+
 
 class StockHandler(BaseHTTPRequestHandler):
 
@@ -738,6 +743,13 @@ class StockHandler(BaseHTTPRequestHandler):
             change = (price - prev)        if (price is not None and prev is not None) else None
             chgpct = (change / prev * 100) if (change is not None and prev)             else None
 
+            # 配当利回りの正規化：yfinance は版により % 値(例 4.87) と分数(0.0487) の両方を返す。
+            # アプリ全体は「分数前提で ×100」のため、% 値とみなせる場合は /100 して分数に統一する。
+            # 0.3 = 利回り30% 相当。これを超える値は分数ではあり得ないため % 値と判定。
+            div_norm = self._num(info.get("dividendYield"))
+            if div_norm is not None and div_norm > 0.3:
+                div_norm = div_norm / 100
+
             currency = "USD" if market == "us" else "JPY"
             return {
                 "shortName":                  info.get("shortName") or info.get("longName") or code,
@@ -750,7 +762,7 @@ class StockHandler(BaseHTTPRequestHandler):
                 "marketCap":                  cap,
                 "trailingPE":                 self._num(info.get("trailingPE")),
                 "priceToBook":                self._num(info.get("priceToBook")),
-                "dividendYield":              self._num(info.get("dividendYield")),
+                "dividendYield":              div_norm,
                 "revenueGrowth":              self._num(info.get("revenueGrowth")),
                 "grossMargins":               self._num(info.get("grossMargins")),
                 "regularMarketVolume":        self._num(info.get("regularMarketVolume") or info.get("volume")),
@@ -926,50 +938,228 @@ class StockHandler(BaseHTTPRequestHandler):
         ws = sum(scores[k] * weights.get(k, 1) for k in scores)
         return round((ws / tw) * 4) if tw > 0 else None
 
+    # ── マクロ環境（恐怖指数・世界情勢・市況）の集約 ──────
+    def _market_context(self):
+        """恐怖指数VIX と market_brief.json の市況を集約。
+        スクリーニングの未来予測にマクロ環境を反映するために使う。"""
+        ctx = {
+            "vix": None, "vix_level": "",
+            "nikkei_pct": None, "sp500_pct": None, "usdjpy": None,
+            "sentiment": "", "news_summary": "", "highlights": [],
+        }
+        # 恐怖指数 VIX（リスクオフの度合い）
+        try:
+            fi = yf.Ticker("^VIX").fast_info
+            v  = self._num(fi.last_price)
+            if v is not None:
+                ctx["vix"] = round(v, 2)
+                ctx["vix_level"] = (
+                    "低水準（楽観・リスクオン）" if v < 15 else
+                    "やや低い（落ち着き）"        if v < 20 else
+                    "警戒（やや不安定）"          if v < 30 else
+                    "高水準（恐怖・売られ過ぎ）"  if v < 40 else
+                    "極度の恐怖（パニック相場）"
+                )
+        except Exception as e:
+            print(f"  [WARN] VIX fetch: {e}")
+        # market_brief.json（多少古くてもマクロ背景として流用）
+        try:
+            if os.path.exists(MARKET_BRIEF_FILE):
+                with open(MARKET_BRIEF_FILE, "r", encoding="utf-8") as f:
+                    mb = json.load(f)
+                idx = mb.get("indices", {}) or {}
+                ctx["nikkei_pct"]   = (idx.get("nikkei") or {}).get("change_pct")
+                ctx["sp500_pct"]    = (idx.get("sp500")  or {}).get("change_pct")
+                ctx["usdjpy"]       = (mb.get("fx") or {}).get("usdjpy")
+                ctx["sentiment"]    = mb.get("sentiment", "") or ""
+                ctx["news_summary"] = mb.get("news_summary", "") or ""
+                ctx["highlights"]   = (mb.get("highlights") or [])[:5]
+        except Exception as e:
+            print(f"  [WARN] market context from brief: {e}")
+        return ctx
+
+    # ── 候補銘柄の未来予測（Claude／マクロ環境を反映） ──────
+    def _forecast_screen(self, stocks, category, market, ctx):
+        """恐怖指数・世界情勢・市況を踏まえ、各候補の今後の見通しと買い場をClaudeで予測。
+        戻り値: (market_view:str, {code: {"outlook","forecast"}})。Claude未設定なら (None, {})。"""
+        client = _get_anthropic()
+        if client is None or not stocks:
+            return None, {}
+        import re
+
+        cat_labels = {
+            "undervalue": "💎 割安優良株（PER/PBR重視・長期）",
+            "dividend":   "💰 安定配当（配当利回り重視）",
+            "tech":       "🚀 先進技術（成長性重視）",
+            "ai":         "🤖 AI半導体（将来性重視）",
+            "tenx":       "💥 10倍候補（売上成長・小型・高粗利）",
+            "other":      "📌 総合",
+        }
+        cat_label = cat_labels.get(category, category)
+        cur = "USD" if market == "us" else "JPY"
+
+        # 候補銘柄を定量スコア順にテキスト化
+        lines = []
+        for i, s in enumerate(stocks):
+            bits = [f"{i+1}. {s.get('name') or s['code']}({s['code']})"]
+            if s.get("per")    is not None: bits.append(f"PER{s['per']:.1f}")
+            if s.get("pbr")    is not None: bits.append(f"PBR{s['pbr']:.2f}")
+            if s.get("div")    is not None: bits.append(f"配当{s['div']*100:.1f}%")
+            if s.get("pos52")  is not None: bits.append(f"52週位置{s['pos52']}%")
+            if s.get("chgpct") is not None: bits.append(f"前日比{s['chgpct']:+.1f}%")
+            if s.get("revenueGrowth") is not None: bits.append(f"成長率{s['revenueGrowth']*100:.0f}%")
+            bits.append(f"[定量スコア{s.get('score')}点]")
+            lines.append(" ".join(bits))
+        cand_text = "\n".join(lines)
+
+        # マクロ環境テキスト
+        macro_lines = []
+        if ctx.get("vix") is not None:
+            macro_lines.append(f"・恐怖指数VIX: {ctx['vix']}（{ctx['vix_level']}）")
+        if ctx.get("nikkei_pct") is not None:
+            macro_lines.append(f"・日経平均 前日比: {ctx['nikkei_pct']:+.2f}%")
+        if ctx.get("sp500_pct") is not None:
+            macro_lines.append(f"・S&P500 前日比: {ctx['sp500_pct']:+.2f}%")
+        if ctx.get("usdjpy") is not None:
+            macro_lines.append(f"・ドル円: {ctx['usdjpy']}")
+        if ctx.get("sentiment"):
+            macro_lines.append(f"・市場センチメント: {ctx['sentiment']}")
+        if ctx.get("news_summary"):
+            macro_lines.append(f"・市況: {ctx['news_summary']}")
+        if ctx.get("highlights"):
+            macro_lines.append("・主要ニュース: " + " / ".join(ctx["highlights"][:4]))
+        macro_text = "\n".join(macro_lines) or "（マクロ情報なし）"
+
+        prompt = f"""あなたは超長期・買い専門の機関投資家アナリストです。
+現在のマクロ環境（恐怖指数・世界情勢・市況）を踏まえ、各候補銘柄の「今後の見通し」と「買い場」を未来予測してください。
+
+【絶対ルール】
+- このユーザーは「超長期・買いのみ」。**売り推奨は絶対にしない**こと。
+- 恐怖指数(VIX)が高い・市況が悪い局面は、優良株を安く仕込める「バーゲン」と捉える視点を持つ。
+- 各銘柄について、上記マクロ環境がその銘柄の今後にどう効くかを必ず織り込むこと。
+- 予測であり投資助言ではない。
+
+【スクリーニング条件】 {cat_label}（{'米国株' if market=='us' else '日本株'}）
+
+【現在のマクロ環境】
+{macro_text}
+
+【候補銘柄】（定量スコア順）
+{cand_text}
+
+次のJSONのみを返す（他の文字は一切含めない）:
+{{"market_view": "今のVIX・世界情勢・市況を踏まえた相場観と買い方針を2〜3文（120文字以内）", "stocks": [{{"code": "銘柄コード", "outlook": "🔼 上昇期待 / ➡️ 中立 / 🔽 慎重 のいずれか1つ", "forecast": "40〜90文字。マクロ環境＋銘柄要因を踏まえた今後の見通しと買い場の予測"}}]}}
+※ stocks は候補銘柄すべてを、同じ code で漏れなく含めること。"""
+
+        try:
+            msg = client.messages.create(
+                model="claude-sonnet-4-5",
+                max_tokens=3500,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = msg.content[0].text
+            m = re.search(r'\{.*\}', raw, re.DOTALL)
+            if not m:
+                print(f"  [WARN] forecast screen: JSON未検出（出力{len(raw)}字, "
+                      f"stop={getattr(msg, 'stop_reason', '?')}）")
+                return None, {}
+            parsed = json.loads(m.group())
+            market_view = str(parsed.get("market_view", "")).strip()
+            fmap = {}
+            for it in parsed.get("stocks", []) or []:
+                if not isinstance(it, dict):
+                    continue
+                code = str(it.get("code", "")).strip().upper()
+                if code:
+                    fmap[code] = {
+                        "outlook":  str(it.get("outlook", "")).strip(),
+                        "forecast": str(it.get("forecast", "")).strip(),
+                    }
+            return market_view, fmap
+        except Exception as e:
+            print(f"  [WARN] forecast screen: {e}")
+            return None, {}
+
     def _screen_stocks(self, market="jp", category="other", exclude=None):
-        """ユニバースからスクリーニングして上位銘柄を返す"""
+        """ユニバースからスクリーニングし、マクロ環境を踏まえた未来予測付きで上位銘柄を返す。
+        戻り値: {"stocks": [...], "market_context": {...}}"""
         import concurrent.futures
         exclude = set(exclude or [])
-        # カテゴリ専用ユニバースがあれば優先（AI半導体・10倍候補・テックなど）
-        cat_uni = self._CATEGORY_UNIVERSE.get(category, {}).get(market)
-        source   = cat_uni if cat_uni else self._UNIVERSE.get(market, [])
-        universe = [c for c in source if c not in exclude]
 
-        results = []
+        # 30分キャッシュ（exclude非依存でスコア＋予測を保持し、返却時にexcludeを適用）
+        cache_key = f"{market}|{category}"
+        cached = _screen_cache.get(cache_key)
+        if cached and (time.time() - cached[0] < SCREEN_TTL):
+            scored, ctx, market_view = cached[1], cached[2], cached[3]
+        else:
+            # カテゴリ専用ユニバースがあれば優先（AI半導体・10倍候補・テックなど）
+            cat_uni  = self._CATEGORY_UNIVERSE.get(category, {}).get(market)
+            source   = cat_uni if cat_uni else self._UNIVERSE.get(market, [])
+            universe = list(dict.fromkeys(source))  # 重複除去・順序維持
 
-        def fetch_one(code):
-            info = self._fetch_quote(code, market)
-            return code, info
+            scored = []
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
-            for code, info in ex.map(fetch_one, universe):
-                if not info:
-                    continue
-                if category == "tenx":
-                    score = self._score_tenx(info)
-                else:
-                    score = self._score_stock(info, category)
-                if score is None:
-                    continue
-                results.append({
-                    "code":          code,
-                    "name":          info.get("shortName") or code,
-                    "price":         info.get("regularMarketPrice"),
-                    "chgpct":        info.get("regularMarketChangePercent"),
-                    "per":           info.get("trailingPE"),
-                    "pbr":           info.get("priceToBook"),
-                    "div":           info.get("dividendYield"),
-                    "high52":        info.get("fiftyTwoWeekHigh"),
-                    "low52":         info.get("fiftyTwoWeekLow"),
-                    "cap":           info.get("marketCap"),
-                    "revenueGrowth": info.get("revenueGrowth"),
-                    "grossMargins":  info.get("grossMargins"),
-                    "market":        market,
-                    "score":         score,
-                })
+            def fetch_one(code):
+                return code, self._fetch_quote(code, market)
 
-        results.sort(key=lambda x: x["score"], reverse=True)
-        return results[:12]
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+                for code, info in ex.map(fetch_one, universe):
+                    if not info:
+                        continue
+                    score = self._score_tenx(info) if category == "tenx" \
+                            else self._score_stock(info, category)
+                    if score is None:
+                        continue
+                    price = info.get("regularMarketPrice")
+                    h     = info.get("fiftyTwoWeekHigh")
+                    l     = info.get("fiftyTwoWeekLow")
+                    pos   = round((price - l) / (h - l) * 100) \
+                            if (price and h and l and h > l) else None
+                    scored.append({
+                        "code":          code,
+                        "name":          info.get("shortName") or code,
+                        "price":         price,
+                        "chgpct":        info.get("regularMarketChangePercent"),
+                        "per":           info.get("trailingPE"),
+                        "pbr":           info.get("priceToBook"),
+                        "div":           info.get("dividendYield"),
+                        "high52":        h,
+                        "low52":         l,
+                        "pos52":         pos,
+                        "cap":           info.get("marketCap"),
+                        "revenueGrowth": info.get("revenueGrowth"),
+                        "grossMargins":  info.get("grossMargins"),
+                        "sector":        info.get("sector", ""),
+                        "industry":      info.get("industry", ""),
+                        "market":        market,
+                        "score":         score,
+                    })
+
+            scored.sort(key=lambda x: x["score"], reverse=True)
+            scored = scored[:15]
+
+            # マクロ環境を集約し、Claude で未来予測を付与
+            ctx = self._market_context()
+            market_view, fmap = self._forecast_screen(scored, category, market, ctx)
+            for s in scored:
+                f = fmap.get(s["code"].upper())
+                if f:
+                    s["outlook"]  = f.get("outlook", "")
+                    s["forecast"] = f.get("forecast", "")
+
+            _screen_cache[cache_key] = (time.time(), scored, ctx, market_view)
+
+        # exclude を除外して上位12件
+        out = [s for s in scored if s["code"] not in exclude][:12]
+        return {
+            "stocks": out,
+            "market_context": {
+                **ctx,
+                "market_view": market_view or "",
+                "category":    category,
+                "market":      market,
+            },
+        }
 
     # ── 関連銘柄取得 ──────────────────────────────────
     def _fetch_related(self, code, market="jp"):

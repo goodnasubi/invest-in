@@ -606,6 +606,79 @@
     .sc-add-btn:hover { opacity: 0.85; }
     .screen-empty { color: var(--text3); font-size: 0.85rem; padding: 20px 0; }
 
+    /* ── 市場環境バナー（恐怖指数・世界情勢・相場観） ── */
+    .screen-context {
+      background: linear-gradient(135deg, rgba(79,142,247,0.12), rgba(79,142,247,0.02));
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 10px;
+      padding: 12px 16px;
+      margin-bottom: 14px;
+      font-size: 0.82rem;
+      line-height: 1.6;
+    }
+    .sx-row { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 6px; align-items: center; }
+    .sx-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: 20px; padding: 3px 11px; font-size: 0.76rem; font-weight: 600;
+    }
+    .sx-chip b { font-weight: 700; }
+    .sx-vix-low  { border-color: #34d39955; color: #34d399; }
+    .sx-vix-mid  { border-color: #fbbf2455; color: #fbbf24; }
+    .sx-vix-high { border-color: #f8717155; color: #f87171; }
+    .sx-view { color: var(--text2); }
+    .sx-view::before { content: "🔮 "; }
+
+    /* ── カード上の見通しチップ ── */
+    .sc-card { cursor: pointer; }
+    .sc-outlook {
+      font-size: 0.7rem; font-weight: 700; margin-top: 4px;
+      padding: 2px 6px; border-radius: 5px; display: inline-block;
+      background: var(--bg2); border: 1px solid var(--border);
+    }
+    .sc-card.sc-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+    /* ── スクリーニング詳細パネル（カードクリックで表示） ── */
+    .screen-detail {
+      margin-top: 16px;
+      background: var(--bg);
+      border: 1px solid var(--accent);
+      border-radius: 12px;
+      padding: 16px 18px;
+      animation: profile-slide 0.18s ease;
+    }
+    .sd-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .sd-title { font-size: 1.02rem; font-weight: 700; }
+    .sd-code  { font-size: 0.74rem; color: var(--text3); font-weight: 500; margin-left: 6px; }
+    .sd-close {
+      background: none; border: none; color: var(--text3);
+      font-size: 1.3rem; line-height: 1; cursor: pointer; padding: 0 4px;
+    }
+    .sd-close:hover { color: var(--text); }
+    .sd-price { font-size: 1.15rem; font-weight: 700; margin: 6px 0 12px; }
+    .sd-price .up { color: var(--green); } .sd-price .down { color: var(--red); }
+    .sd-forecast {
+      background: rgba(79,142,247,0.08);
+      border: 1px solid var(--border);
+      border-radius: 9px; padding: 11px 13px; margin-bottom: 12px;
+    }
+    .sd-outlook { font-size: 0.82rem; font-weight: 700; margin-bottom: 5px; }
+    .sd-forecast-txt { font-size: 0.85rem; color: var(--text2); line-height: 1.65; }
+    .sd-forecast-lbl { font-size: 0.68rem; color: var(--text3); margin-bottom: 6px; letter-spacing: 0.04em; }
+    .sd-metrics {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+      gap: 8px; margin-bottom: 12px;
+    }
+    .sd-metric {
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: 8px; padding: 7px 9px;
+    }
+    .sd-metric span { display: block; font-size: 0.66rem; color: var(--text3); margin-bottom: 2px; }
+    .sd-metric b    { font-size: 0.92rem; font-weight: 700; }
+    .sd-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .sd-profile { margin-top: 12px; }
+
     /* ── チャート ── */
     .chart-section {
       background: var(--bg);
@@ -972,9 +1045,11 @@
       <button class="btn btn-primary btn-sm" onclick="runScreening()">🔎 スクリーニング実行</button>
     </div>
   </div>
+  <div class="screen-context" id="screenContext" style="display:none"></div>
   <div class="screen-cards" id="screenCards">
-    <span class="screen-empty">「スクリーニング実行」を押すと、条件に合う銘柄を自動で探します。</span>
+    <span class="screen-empty">「スクリーニング実行」を押すと、恐怖指数・世界情勢・市況を踏まえた未来予測付きで銘柄を探します。</span>
   </div>
+  <div class="screen-detail" id="screenDetail" style="display:none"></div>
 </div>
 
 <!-- テーブル -->
@@ -1472,6 +1547,10 @@ const CAT = {
 function fmt(n, digits=2) {
   if (n == null || isNaN(n)) return '—';
   return n.toFixed(digits);
+}
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 }
 function fmtPrice(n, digits=1) {
   if (n == null || isNaN(n)) return '—';
@@ -2248,6 +2327,8 @@ function toggleScoreSort(el) {
 // ────────────────────────────────────────
 //  スクリーニング
 // ────────────────────────────────────────
+let _lastScreen = null;   // { stocks, market_context, market } 直近のスクリーニング結果
+
 function toggleScreenPanel(el) {
   const panel = document.getElementById('screenPanel');
   const open  = panel.style.display === 'none';
@@ -2260,25 +2341,62 @@ async function runScreening() {
   const category = document.getElementById('screenCategory').value;
   const exclude  = watchlist.map(s => s.code).join(',');
   const cards    = document.getElementById('screenCards');
+  const ctxBox   = document.getElementById('screenContext');
 
+  ctxBox.style.display = 'none';
+  closeScreenDetail();
   cards.innerHTML = `<div style="display:flex;align-items:center;gap:8px;color:var(--text3);font-size:0.85rem;padding:16px 0">
-    <span class="spinner"></span>スクリーニング中… 銘柄データを取得しています（30秒ほどかかる場合があります）
+    <span class="spinner"></span>スクリーニング中… 恐怖指数・世界情勢・市況を踏まえて未来予測しています（30秒ほどかかる場合があります）
   </div>`;
 
   try {
     const res  = await fetch(
       `${API_BASE}/api/screen?market=${market}&category=${category}&exclude=${encodeURIComponent(exclude)}`,
-      { signal: AbortSignal.timeout(90000) }
+      { signal: AbortSignal.timeout(120000) }
     );
     const data = await res.json();
-    if (!Array.isArray(data) || data.length === 0) {
+    // 新形式 {stocks, market_context} / 旧形式（配列）の両対応
+    const stocks = Array.isArray(data) ? data : (data.stocks || []);
+    const ctx    = Array.isArray(data) ? null : (data.market_context || null);
+
+    if (!stocks.length) {
       cards.innerHTML = '<span class="screen-empty">条件に合う銘柄が見つかりませんでした。</span>';
       return;
     }
-    renderScreenCards(data, market);
+    _lastScreen = { stocks, market_context: ctx, market };
+    renderScreenContext(ctx);
+    renderScreenCards(stocks, market);
   } catch (e) {
     cards.innerHTML = '<span class="screen-empty">⚠️ 取得に失敗しました。サーバーが起動しているか確認してください。</span>';
   }
+}
+
+// 市場環境バナー（恐怖指数・主要指数・相場観）
+function renderScreenContext(ctx) {
+  const box = document.getElementById('screenContext');
+  if (!ctx) { box.style.display = 'none'; return; }
+
+  const chips = [];
+  if (ctx.vix != null) {
+    const vc = ctx.vix < 20 ? 'sx-vix-low' : ctx.vix < 30 ? 'sx-vix-mid' : 'sx-vix-high';
+    chips.push(`<span class="sx-chip ${vc}" title="恐怖指数（VIX）">😱 VIX <b>${fmt(ctx.vix, 1)}</b> ${ctx.vix_level || ''}</span>`);
+  }
+  if (ctx.nikkei_pct != null) {
+    const c = ctx.nikkei_pct >= 0 ? 'up' : 'down';
+    chips.push(`<span class="sx-chip">日経 <b class="${c}">${ctx.nikkei_pct >= 0 ? '+' : ''}${fmt(ctx.nikkei_pct, 2)}%</b></span>`);
+  }
+  if (ctx.sp500_pct != null) {
+    const c = ctx.sp500_pct >= 0 ? 'up' : 'down';
+    chips.push(`<span class="sx-chip">S&P500 <b class="${c}">${ctx.sp500_pct >= 0 ? '+' : ''}${fmt(ctx.sp500_pct, 2)}%</b></span>`);
+  }
+  if (ctx.usdjpy != null) chips.push(`<span class="sx-chip">ドル円 <b>${fmt(ctx.usdjpy, 2)}</b></span>`);
+  if (ctx.sentiment)      chips.push(`<span class="sx-chip">🌡️ ${esc(ctx.sentiment)}</span>`);
+
+  const view = ctx.market_view
+    ? `<div class="sx-view">${esc(ctx.market_view)}</div>` : '';
+
+  box.innerHTML = `<div class="sx-row">${chips.join('')}</div>${view}`;
+  box.style.display = chips.length || view ? '' : 'none';
 }
 
 function renderScreenCards(stocks, market) {
@@ -2315,20 +2433,127 @@ function renderScreenCards(stocks, market) {
       ${sig.label}${sig.score != null ? `<span class="signal-score">${sig.score}点</span>` : ''}
     </span>`;
 
+    const outlookHtml = s.outlook
+      ? `<div class="sc-outlook">${esc(s.outlook)}</div>` : '';
+
     const isAdded = watched.has(s.code);
-    return `<div class="sc-card${isAdded ? ' sc-added' : ''}" id="sccard-${s.code}">
+    return `<div class="sc-card${isAdded ? ' sc-added' : ''}" id="sccard-${s.code}"
+        onclick="showScreenDetail('${s.code}','${market}')" title="クリックで詳細を表示">
       <span class="sc-rank">${i + 1}位</span>
-      <div class="sc-name">${flag} ${s.name}</div>
+      <div class="sc-name">${flag} ${esc(s.name)}</div>
       <div class="sc-code">${s.code}${isUS ? ' · NYSE/NASDAQ' : ' · 東証'}</div>
       <div class="sc-price">${price} ${chgStr}</div>
       ${meta ? `<div class="sc-meta">${meta}</div>` : ''}
+      ${outlookHtml}
       <div style="margin-top:4px">${sigHtml}</div>
-      <button class="sc-add-btn" onclick="addScreenedStock('${s.code}','${market}')"
+      <button class="sc-add-btn" onclick="event.stopPropagation();addScreenedStock('${s.code}','${market}')"
         ${isAdded ? 'disabled' : ''}>
         ${isAdded ? '✓ 追加済み' : '＋ ウォッチリストに追加'}
       </button>
     </div>`;
   }).join('');
+}
+
+// ── スクリーニング詳細パネル（カードクリックで下部に表示） ──
+let _screenDetailCode = null;
+
+function showScreenDetail(code, market, scroll = true) {
+  if (!_lastScreen) return;
+  const s = _lastScreen.stocks.find(x => x.code === code);
+  if (!s) return;
+  _screenDetailCode = code;
+
+  // 選択カードをハイライト
+  document.querySelectorAll('.sc-card.sc-selected').forEach(c => c.classList.remove('sc-selected'));
+  document.getElementById(`sccard-${code}`)?.classList.add('sc-selected');
+
+  const isUS = market === 'us';
+  const flag = isUS ? '🇺🇸' : '🇯🇵';
+  const price = s.price != null
+    ? (isUS ? '$' + fmtPrice(s.price, 2) : fmtPrice(s.price) + '円') : '—';
+  const chgCls = (s.chgpct ?? 0) >= 0 ? 'up' : 'down';
+  const chgStr = s.chgpct != null
+    ? `<span class="${chgCls}">${s.chgpct >= 0 ? '+' : ''}${fmt(s.chgpct, 2)}%</span>` : '';
+
+  // 指標グリッド
+  const metrics = [];
+  const push = (label, val) => { if (val) metrics.push(`<div class="sd-metric"><span>${label}</span><b>${val}</b></div>`); };
+  push('PER',      s.per != null ? fmt(s.per, 1) + '倍' : null);
+  push('PBR',      s.pbr != null ? fmt(s.pbr, 2) + '倍' : null);
+  push('配当利回り', s.div != null ? (s.div * 100).toFixed(2) + '%' : null);
+  push('52週位置',  s.pos52 != null ? s.pos52 + '%' : null);
+  push('時価総額',  s.cap != null ? fmtCap(s.cap, isUS) : null);
+  push('売上成長率', s.revenueGrowth != null ? (s.revenueGrowth * 100).toFixed(0) + '%' : null);
+  push('粗利率',    s.grossMargins != null ? (s.grossMargins * 100).toFixed(0) + '%' : null);
+  if (s.sector) push('セクター', esc(s.sector));
+
+  // スコアシグナル（スクリーニングカテゴリ基準）
+  const cat = document.getElementById('screenCategory').value;
+  const sig = calcSignal({
+    regularMarketPrice: s.price, fiftyTwoWeekHigh: s.high52, fiftyTwoWeekLow: s.low52,
+    trailingPE: s.per, priceToBook: s.pbr, dividendYield: s.div,
+    revenueGrowth: s.revenueGrowth, marketCap: s.cap, grossMargins: s.grossMargins, market,
+  }, cat);
+  const scoreHtml = `<span class="signal ${sig.cls}" style="font-size:0.72rem;padding:2px 7px">${sig.label}${sig.score != null ? `<span class="signal-score">${sig.score}点</span>` : ''}</span>`;
+
+  // AI未来予測
+  const forecastHtml = s.forecast
+    ? `<div class="sd-forecast">
+        <div class="sd-forecast-lbl">🔮 マクロ環境（恐怖指数・世界情勢）を踏まえた未来予測</div>
+        ${s.outlook ? `<div class="sd-outlook">${esc(s.outlook)}</div>` : ''}
+        <div class="sd-forecast-txt">${esc(s.forecast)}</div>
+      </div>`
+    : `<div class="sd-forecast"><div class="sd-forecast-txt" style="color:var(--text3)">
+        AI未来予測は生成されていません（サーバーに ANTHROPIC_API_KEY が未設定の場合は表示されません）。</div></div>`;
+
+  const watched = watchlist.find(x => x.code === code && x.market === market);
+  const addBtn = watched
+    ? `<button class="btn btn-sm" disabled>✓ 追加済み</button>`
+    : `<button class="btn btn-primary btn-sm" onclick="addScreenedStock('${code}','${market}')">＋ ウォッチリストに追加</button>`;
+
+  const box = document.getElementById('screenDetail');
+  box.innerHTML = `
+    <div class="sd-head">
+      <div class="sd-title">${flag} ${esc(s.name)}<span class="sd-code">${code}${isUS ? ' · NYSE/NASDAQ' : ' · 東証'}</span></div>
+      <button class="sd-close" onclick="closeScreenDetail()" title="閉じる">×</button>
+    </div>
+    <div class="sd-price">${price} ${chgStr}　${scoreHtml}</div>
+    ${forecastHtml}
+    <div class="sd-metrics">${metrics.join('')}</div>
+    <div class="sd-actions">
+      ${addBtn}
+      <button class="btn btn-sm" onclick="loadScreenProfile('${code}','${market}')">🏢 会社概要を表示</button>
+    </div>
+    <div class="sd-profile" id="sd-profile"></div>
+  `;
+  box.style.display = '';
+  if (scroll) box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function closeScreenDetail() {
+  _screenDetailCode = null;
+  const box = document.getElementById('screenDetail');
+  if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+  document.querySelectorAll('.sc-card.sc-selected').forEach(c => c.classList.remove('sc-selected'));
+}
+
+async function loadScreenProfile(code, market) {
+  const sec = document.getElementById('sd-profile');
+  if (!sec) return;
+  const ck = `${code}|${market}`;
+  if (_profileCache[ck]) { sec.innerHTML = buildProfileHtml(_profileCache[ck]); return; }
+  sec.innerHTML = `<div class="pf-loading"><span class="spinner"></span>会社概要を取得中…</div>`;
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/profile?code=${encodeURIComponent(code)}&market=${market}`,
+      { signal: AbortSignal.timeout(25000) }
+    );
+    const data = await res.json();
+    _profileCache[ck] = data;
+    sec.innerHTML = buildProfileHtml(data);
+  } catch (e) {
+    sec.innerHTML = `<div class="pf-err">⚠️ 会社概要の取得に失敗しました: ${e.message}</div>`;
+  }
 }
 
 async function addScreenedStock(code, market) {
@@ -2348,6 +2573,8 @@ async function addScreenedStock(code, market) {
     card.classList.add('sc-added');
     card.querySelector('.sc-add-btn').textContent = '✓ 追加済み';
   }
+  // 詳細パネルが同じ銘柄を表示中なら追加ボタンを更新（スクロールはしない）
+  if (_screenDetailCode === code) showScreenDetail(code, market, false);
 
   const data = await fetchYahooQuote(code, market);
   if (data) {
