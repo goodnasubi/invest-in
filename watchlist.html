@@ -22,16 +22,42 @@
       --text: #e2e8f0;
       --text2: #94a3b8;
       --text3: #64748b;
+
+      /* elevation & shape (polish) */
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.25);
+      --shadow-md: 0 6px 20px rgba(0,0,0,0.35);
+      --shadow-lg: 0 12px 32px rgba(0,0,0,0.5);
+      --ring: 0 0 0 3px rgba(79,142,247,0.25);
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
+    /* themed scrollbars (polish) */
+    * { scrollbar-width: thin; scrollbar-color: var(--bg3) transparent; }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb {
+      background: var(--bg3);
+      border-radius: 8px;
+      border: 2px solid var(--bg);
+    }
+    ::-webkit-scrollbar-thumb:hover { background: var(--border); }
+
     body {
       font-family: 'Hiragino Sans', 'Yu Gothic UI', Meiryo, sans-serif;
       background: var(--bg);
+      background-image: radial-gradient(1100px 520px at 50% -220px, rgba(79,142,247,0.07), transparent 70%);
+      background-attachment: fixed;
       color: var(--text);
       min-height: 100vh;
       padding: 24px 16px;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+      font-variant-numeric: tabular-nums;
     }
 
     /* ── Header ── */
@@ -46,7 +72,13 @@
       font-weight: 700;
       letter-spacing: 0.02em;
     }
-    .header h1 span { color: var(--accent); }
+    .header h1 span {
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      color: transparent;
+    }
     .header-actions { display: flex; gap: 10px; align-items: center; }
 
     .btn {
@@ -60,10 +92,14 @@
     }
     .btn:hover { opacity: 0.85; transform: translateY(-1px); }
     .btn:active { transform: translateY(0); }
-    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary { background: var(--accent); color: #fff; box-shadow: 0 2px 10px rgba(79,142,247,0.35); }
     .btn-secondary { background: var(--bg3); color: var(--text2); border: 1px solid var(--border); }
     .btn-danger { background: #3d1a1a; color: var(--red); border: 1px solid #5c2020; }
     .btn-sm { padding: 5px 10px; font-size: 0.78rem; }
+    .btn:focus-visible,
+    .filter-btn:focus-visible,
+    .period-btn:focus-visible,
+    .tag:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
     /* ── Add Stock Panel ── */
     .add-panel {
@@ -72,6 +108,7 @@
       border-radius: 14px;
       padding: 20px;
       margin-bottom: 24px;
+      box-shadow: var(--shadow-sm);
     }
     .add-panel h2 { font-size: 0.95rem; color: var(--text2); margin-bottom: 14px; }
     .add-row {
@@ -94,6 +131,7 @@
     }
     .input-group input:focus, .input-group select:focus {
       border-color: var(--accent);
+      box-shadow: var(--ring);
     }
     .input-group input::placeholder { color: var(--text3); }
     #codeInput { width: 110px; font-size: 1rem; letter-spacing: 0.1em; }
@@ -134,9 +172,105 @@
       padding: 12px 18px;
       flex: 1;
       min-width: 120px;
+      box-shadow: var(--shadow-sm);
+      transition: border-color 0.15s;
     }
+    .stat-card:hover { border-color: #3a3f5c; }
     .stat-card .label { font-size: 0.72rem; color: var(--text3); margin-bottom: 4px; }
     .stat-card .value { font-size: 1.2rem; font-weight: 700; }
+
+
+    /* ── Market Brief Panel ── */
+    .brief-panel {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px 20px;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow-sm);
+    }
+    .brief-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+    }
+    .brief-title {
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: var(--text2);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .brief-meta { font-size: 0.75rem; color: var(--text3); }
+    .brief-body { margin-top: 14px; }
+    .brief-indices {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .brief-idx {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 14px;
+      min-width: 110px;
+    }
+    .brief-idx .idx-label { font-size: 0.7rem; color: var(--text3); margin-bottom: 2px; }
+    .brief-idx .idx-val   { font-size: 1rem; font-weight: 700; }
+    .brief-idx .idx-chg   { font-size: 0.75rem; }
+    .brief-section { margin-bottom: 10px; }
+    .brief-section-label {
+      font-size: 0.72rem;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 6px;
+    }
+    .brief-highlights { display: flex; flex-direction: column; gap: 4px; }
+    .brief-highlight {
+      font-size: 0.82rem;
+      color: var(--text2);
+      padding-left: 12px;
+      position: relative;
+    }
+    .brief-highlight::before { content: '•'; position: absolute; left: 0; color: var(--accent); }
+    .brief-hot-stocks {
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .brief-hot-item {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 0.82rem;
+      transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+    }
+    .brief-hot-item:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: var(--shadow-md); }
+    .brief-hot-item .hot-name {
+      font-weight: 700; color: var(--text); margin-bottom: 3px;
+    }
+    .brief-hot-item .hot-code {
+      color: var(--text3); font-size: 0.74rem; font-weight: 400; margin-left: 4px;
+    }
+    .brief-hot-item .hot-reason {
+      color: var(--text2); line-height: 1.5; font-size: 0.79rem;
+    }
+    /* 旧形式（テーマのみ等）のチップ表示を残す互換 */
+    .brief-hot-chip {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 3px 12px;
+      font-size: 0.78rem;
+      color: var(--text2);
+    }
+    .brief-hot-chip:hover { border-color: var(--accent); color: var(--text); }
+    .brief-sentiment { font-size: 0.83rem; color: var(--accent); font-style: italic; }
+    .brief-placeholder { font-size: 0.82rem; color: var(--text3); text-align: center; padding: 12px 0; }
 
     /* ── Filter Bar ── */
     .filter-bar {
@@ -286,6 +420,11 @@
       50%       { box-shadow: 0 0 0 3px rgba(34,197,94,0.25); }
     }
 
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 0.55; transform: scale(0.92); }
+      50%       { opacity: 1;    transform: scale(1.15); }
+    }
+
     /* メモ・目標価格 */
     .inline-edit {
       background: transparent;
@@ -400,9 +539,9 @@
       padding: 10px 14px;
       min-width: 150px;
       position: relative;
-      transition: border-color 0.15s;
+      transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
     }
-    .related-card:hover { border-color: var(--accent); }
+    .related-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: var(--shadow-md); }
     .related-card .rc-name  { font-size: 0.82rem; font-weight: 600; color: var(--text); }
     .related-card .rc-code  { font-size: 0.72rem; color: var(--text3); }
     .related-card .rc-price { font-size: 0.95rem; font-weight: 700; margin-top: 4px; }
@@ -422,6 +561,7 @@
       border-radius: 12px;
       padding: 14px 16px;
       max-width: 700px;
+      box-shadow: var(--shadow-sm);
     }
     .suggest-panel h4 { font-size: 0.83rem; color: var(--text2); margin-bottom: 10px; }
     .suggest-list {
@@ -450,7 +590,7 @@
       border-radius: 8px; color: var(--text);
       padding: 6px 10px; font-size: 0.85rem; outline: none; width: 110px;
     }
-    .manual-add-row input:focus { border-color: var(--accent); }
+    .manual-add-row input:focus { border-color: var(--accent); box-shadow: var(--ring); }
     .loading-suggest {
       font-size: 0.8rem; color: var(--text3);
       display: flex; align-items: center; gap: 6px;
@@ -463,6 +603,7 @@
       border-radius: 14px;
       padding: 16px 20px;
       margin-bottom: 20px;
+      box-shadow: var(--shadow-sm);
     }
     .screen-panel-hdr {
       display: flex; align-items: center; justify-content: space-between;
@@ -475,6 +616,7 @@
       border-radius: 6px; color: var(--text2);
       padding: 5px 10px; font-size: 0.8rem; outline: none; cursor: pointer;
     }
+    .screen-controls select:focus { border-color: var(--accent); box-shadow: var(--ring); }
     .screen-cards {
       display: flex; flex-wrap: wrap; gap: 10px;
     }
@@ -485,10 +627,10 @@
       padding: 12px 14px;
       min-width: 155px; max-width: 190px;
       display: flex; flex-direction: column; gap: 3px;
-      transition: border-color 0.15s;
+      transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
       position: relative;
     }
-    .sc-card:hover { border-color: var(--accent); }
+    .sc-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: var(--shadow-md); }
     .sc-card.sc-added { opacity: 0.45; pointer-events: none; }
     .sc-rank {
       position: absolute; top: 8px; right: 8px;
@@ -508,6 +650,79 @@
     }
     .sc-add-btn:hover { opacity: 0.85; }
     .screen-empty { color: var(--text3); font-size: 0.85rem; padding: 20px 0; }
+
+    /* ── 市場環境バナー（恐怖指数・世界情勢・相場観） ── */
+    .screen-context {
+      background: linear-gradient(135deg, rgba(79,142,247,0.12), rgba(79,142,247,0.02));
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 10px;
+      padding: 12px 16px;
+      margin-bottom: 14px;
+      font-size: 0.82rem;
+      line-height: 1.6;
+    }
+    .sx-row { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 6px; align-items: center; }
+    .sx-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: 20px; padding: 3px 11px; font-size: 0.76rem; font-weight: 600;
+    }
+    .sx-chip b { font-weight: 700; }
+    .sx-vix-low  { border-color: #34d39955; color: #34d399; }
+    .sx-vix-mid  { border-color: #fbbf2455; color: #fbbf24; }
+    .sx-vix-high { border-color: #f8717155; color: #f87171; }
+    .sx-view { color: var(--text2); }
+    .sx-view::before { content: "🔮 "; }
+
+    /* ── カード上の見通しチップ ── */
+    .sc-card { cursor: pointer; }
+    .sc-outlook {
+      font-size: 0.7rem; font-weight: 700; margin-top: 4px;
+      padding: 2px 6px; border-radius: 5px; display: inline-block;
+      background: var(--bg2); border: 1px solid var(--border);
+    }
+    .sc-card.sc-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+    /* ── スクリーニング詳細パネル（カードクリックで表示） ── */
+    .screen-detail {
+      margin-top: 16px;
+      background: var(--bg);
+      border: 1px solid var(--accent);
+      border-radius: 12px;
+      padding: 16px 18px;
+      animation: profile-slide 0.18s ease;
+    }
+    .sd-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .sd-title { font-size: 1.02rem; font-weight: 700; }
+    .sd-code  { font-size: 0.74rem; color: var(--text3); font-weight: 500; margin-left: 6px; }
+    .sd-close {
+      background: none; border: none; color: var(--text3);
+      font-size: 1.3rem; line-height: 1; cursor: pointer; padding: 0 4px;
+    }
+    .sd-close:hover { color: var(--text); }
+    .sd-price { font-size: 1.15rem; font-weight: 700; margin: 6px 0 12px; }
+    .sd-price .up { color: var(--green); } .sd-price .down { color: var(--red); }
+    .sd-forecast {
+      background: rgba(79,142,247,0.08);
+      border: 1px solid var(--border);
+      border-radius: 9px; padding: 11px 13px; margin-bottom: 12px;
+    }
+    .sd-outlook { font-size: 0.82rem; font-weight: 700; margin-bottom: 5px; }
+    .sd-forecast-txt { font-size: 0.85rem; color: var(--text2); line-height: 1.65; }
+    .sd-forecast-lbl { font-size: 0.68rem; color: var(--text3); margin-bottom: 6px; letter-spacing: 0.04em; }
+    .sd-metrics {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+      gap: 8px; margin-bottom: 12px;
+    }
+    .sd-metric {
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: 8px; padding: 7px 9px;
+    }
+    .sd-metric span { display: block; font-size: 0.66rem; color: var(--text3); margin-bottom: 2px; }
+    .sd-metric b    { font-size: 0.92rem; font-weight: 700; }
+    .sd-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .sd-profile { margin-top: 12px; }
 
     /* ── チャート ── */
     .chart-section {
@@ -579,6 +794,74 @@
     }
     .rc-wl-btn:hover { background: var(--accent); color: #fff; }
     .rc-wl-btn.wl-added { border-color: var(--border); color: var(--text3); background: transparent; cursor: default; }
+
+    /* ── 会社概要パネル ── */
+    .profile-section {
+      background: #11141f;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-top: 8px;
+      padding: 14px 16px;
+      animation: profile-slide 0.25s ease-out;
+    }
+    @keyframes profile-slide {
+      from { opacity: 0; transform: translateY(-4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .profile-section .pf-hdr {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 8px;
+    }
+    .profile-section .pf-name {
+      font-size: 0.95rem; font-weight: 700; color: var(--text);
+    }
+    .profile-section .pf-loading {
+      display: flex; align-items: center; gap: 8px;
+      color: var(--text3); font-size: 0.82rem;
+    }
+    .profile-section .pf-tags {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      margin-bottom: 10px;
+    }
+    .profile-section .pf-tag {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      color: var(--text2);
+      border-radius: 10px;
+      padding: 2px 10px;
+      font-size: 0.72rem;
+    }
+    .profile-section .pf-tag.pf-sector   { color: #60a5fa; border-color: #1e3a5f; }
+    .profile-section .pf-tag.pf-industry { color: #a78bfa; border-color: #2d2060; }
+    .profile-section .pf-summary {
+      font-size: 0.85rem;
+      line-height: 1.7;
+      color: var(--text);
+      white-space: pre-wrap;
+    }
+    .profile-section .pf-summary.pf-en {
+      font-size: 0.78rem;
+      color: var(--text2);
+      max-height: 140px;
+      overflow-y: auto;
+      border-top: 1px dashed var(--border);
+      padding-top: 8px;
+      margin-top: 10px;
+    }
+    .profile-section .pf-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.78rem;
+    }
+    .profile-section .pf-link:hover { text-decoration: underline; }
+    .profile-section .pf-err {
+      color: var(--yellow); font-size: 0.82rem;
+    }
+    .profile-btn.active {
+      background: #1a2540;
+      border-color: var(--accent);
+      color: var(--accent);
+    }
 
     /* ── AI解説ボタン＆ポップオーバー ── */
     .explain-btn {
@@ -652,8 +935,8 @@
   <h1>📈 株式<span>ウォッチリスト</span></h1>
   <div class="header-actions">
     <div style="display:flex;align-items:center;gap:6px">
-      <div id="serverDot" style="width:8px;height:8px;border-radius:50%;background:var(--text3)"></div>
-      <span id="serverLabel" class="updated-at">確認中...</span>
+      <div id="serverDot" style="width:8px;height:8px;border-radius:50%;background:var(--yellow);animation:pulse-dot 1.2s ease-in-out infinite"></div>
+      <span id="serverLabel" class="updated-at">市場情報を取得中…</span>
     </div>
     <span class="updated-at" id="updatedAt">未更新</span>
     <div style="display:flex;align-items:center;gap:6px">
@@ -707,6 +990,24 @@
       <input id="memoInput" type="text" placeholder="例: 中期決算後に注目">
     </div>
     <button class="btn btn-primary" onclick="addStock()">追加</button>
+  </div>
+</div>
+
+<!-- マーケットブリーフィングパネル -->
+<div class="brief-panel" id="briefPanel">
+  <div class="brief-header" onclick="toggleBrief()">
+    <div class="brief-title">
+      <span>📰</span>
+      <span>マーケット状況</span>
+      <span id="briefToggleIcon" style="font-size:0.75rem;color:var(--text3)">▼</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <span class="brief-meta" id="briefGeneratedAt">読み込み中...</span>
+      <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();loadMarketBrief()" title="再読み込み">🔄</button>
+    </div>
+  </div>
+  <div class="brief-body" id="briefBody">
+    <div class="brief-placeholder">読み込み中...</div>
   </div>
 </div>
 
@@ -789,9 +1090,11 @@
       <button class="btn btn-primary btn-sm" onclick="runScreening()">🔎 スクリーニング実行</button>
     </div>
   </div>
+  <div class="screen-context" id="screenContext" style="display:none"></div>
   <div class="screen-cards" id="screenCards">
-    <span class="screen-empty">「スクリーニング実行」を押すと、条件に合う銘柄を自動で探します。</span>
+    <span class="screen-empty">「スクリーニング実行」を押すと、恐怖指数・世界情勢・市況を踏まえた未来予測付きで銘柄を探します。</span>
   </div>
+  <div class="screen-detail" id="screenDetail" style="display:none"></div>
 </div>
 
 <!-- テーブル -->
@@ -840,6 +1143,7 @@ const STORAGE_KEY = 'jp_watchlist_v2';
 //  状態管理
 // ────────────────────────────────────────
 let watchlist     = [];   // init() で非同期ロード
+let marketBrief   = null; // /api/market-brief のキャッシュ
 let stockData     = {};   // { code: yahooData }
 let currentFilter = 'all';
 let sortByScore   = false;
@@ -880,29 +1184,80 @@ async function saveToStorage() {
 // ────────────────────────────────────────
 //  サーバー状態管理
 // ────────────────────────────────────────
-let serverOk = false;
+let serverOk     = false;
+let serverState  = 'connecting';   // 'connecting' | 'ok' | 'failed'
+const RETRY_MAX  = 5;              // 最大リトライ回数
 
-async function checkServer() {
+async function _pingHealth(timeoutMs = 3000) {
   try {
-    const res = await fetch(API_BASE + '/health', { signal: AbortSignal.timeout(2000) });
-    serverOk = res.ok;
+    const res = await fetch(API_BASE + '/health', { signal: AbortSignal.timeout(timeoutMs) });
+    return res.ok;
   } catch {
-    serverOk = false;
+    return false;
   }
+}
+
+// サーバー状態を更新（fetchYahooQuote などからも呼ばれる）
+async function checkServer() {
+  const ok    = await _pingHealth(2500);
+  serverOk    = ok;
+  serverState = ok ? 'ok' : 'failed';
   updateServerBanner();
+  return ok;
+}
+
+// 起動時：バックグラウンドでリトライしつつソフトな表示
+async function connectWithRetries() {
+  serverState = 'connecting';
+  serverOk    = false;
+  updateServerBanner();
+
+  for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
+    // 試行ごとに少しずつタイムアウトを伸ばす（起動直後の遅延を許容）
+    const timeoutMs = 2500 + attempt * 1000;
+    const label     = document.getElementById('serverLabel');
+    if (label) label.textContent = `市場情報を取得中… (${attempt}/${RETRY_MAX})`;
+
+    if (await _pingHealth(timeoutMs)) {
+      serverOk    = true;
+      serverState = 'ok';
+      updateServerBanner();
+      return true;
+    }
+
+    // 次の試行までインターバル（最後のループ後は待たない）
+    if (attempt < RETRY_MAX) await new Promise(r => setTimeout(r, 1500));
+  }
+
+  serverOk    = false;
+  serverState = 'failed';
+  updateServerBanner();
+  return false;
 }
 
 function updateServerBanner() {
   const banner = document.getElementById('serverBanner');
   const dot    = document.getElementById('serverDot');
   const label  = document.getElementById('serverLabel');
-  if (serverOk) {
+  if (!banner || !dot || !label) return;
+
+  if (serverState === 'ok') {
     banner.style.display = 'none';
     dot.style.background = 'var(--green)';
+    dot.style.boxShadow  = '';
+    dot.style.animation  = '';
     label.textContent    = 'サーバー接続中';
+  } else if (serverState === 'connecting') {
+    // 接続中は黄色＋脈動アニメーション、バナーは出さない
+    banner.style.display = 'none';
+    dot.style.background = 'var(--yellow)';
+    dot.style.animation  = 'pulse-dot 1.2s ease-in-out infinite';
+    // 文言は connectWithRetries 側でカウンタ表示するためそのまま
   } else {
+    // failed
     banner.style.display = 'flex';
     dot.style.background = 'var(--red)';
+    dot.style.animation  = '';
     label.textContent    = 'サーバー未接続';
   }
 }
@@ -1238,6 +1593,10 @@ function fmt(n, digits=2) {
   if (n == null || isNaN(n)) return '—';
   return n.toFixed(digits);
 }
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
 function fmtPrice(n, digits=1) {
   if (n == null || isNaN(n)) return '—';
   return n.toLocaleString('en-US', { maximumFractionDigits: digits, minimumFractionDigits: digits });
@@ -1564,7 +1923,10 @@ function renderRelatedPanel(code, panel) {
     <div class="chart-section">
       <div class="chart-toolbar">
         <span class="chart-title" id="chart-title-${code}">📈 読み込み中...</span>
-        <div style="display:flex;align-items:center;gap:8px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <button class="period-btn profile-btn" id="profile-btn-${code}"
+            onclick="toggleProfile('${code}','${parentMk}')"
+            title="会社概要を表示/非表示">🏢 会社概要</button>
           <button class="period-btn" id="rccbtn-${code}-${code}"
             onclick="switchChart('${code}','${code}','${parentMk}')"
             title="本銘柄のチャートに戻る"
@@ -1577,6 +1939,7 @@ function renderRelatedPanel(code, panel) {
       </div>
       <div class="chart-resize-handle" onmousedown="startChartResize(event,'${code}')" title="ドラッグで高さを変更"></div>
     </div>
+    <div class="profile-section" id="profile-section-${code}" style="display:none"></div>
     <div class="related-panel-header" style="margin-top:12px">
       <span>🔗 関連銘柄（${related.length}件登録済み）</span>
     </div>
@@ -2009,6 +2372,8 @@ function toggleScoreSort(el) {
 // ────────────────────────────────────────
 //  スクリーニング
 // ────────────────────────────────────────
+let _lastScreen = null;   // { stocks, market_context, market } 直近のスクリーニング結果
+
 function toggleScreenPanel(el) {
   const panel = document.getElementById('screenPanel');
   const open  = panel.style.display === 'none';
@@ -2021,25 +2386,62 @@ async function runScreening() {
   const category = document.getElementById('screenCategory').value;
   const exclude  = watchlist.map(s => s.code).join(',');
   const cards    = document.getElementById('screenCards');
+  const ctxBox   = document.getElementById('screenContext');
 
+  ctxBox.style.display = 'none';
+  closeScreenDetail();
   cards.innerHTML = `<div style="display:flex;align-items:center;gap:8px;color:var(--text3);font-size:0.85rem;padding:16px 0">
-    <span class="spinner"></span>スクリーニング中… 銘柄データを取得しています（30秒ほどかかる場合があります）
+    <span class="spinner"></span>スクリーニング中… 恐怖指数・世界情勢・市況を踏まえて未来予測しています（30秒ほどかかる場合があります）
   </div>`;
 
   try {
     const res  = await fetch(
       `${API_BASE}/api/screen?market=${market}&category=${category}&exclude=${encodeURIComponent(exclude)}`,
-      { signal: AbortSignal.timeout(90000) }
+      { signal: AbortSignal.timeout(120000) }
     );
     const data = await res.json();
-    if (!Array.isArray(data) || data.length === 0) {
+    // 新形式 {stocks, market_context} / 旧形式（配列）の両対応
+    const stocks = Array.isArray(data) ? data : (data.stocks || []);
+    const ctx    = Array.isArray(data) ? null : (data.market_context || null);
+
+    if (!stocks.length) {
       cards.innerHTML = '<span class="screen-empty">条件に合う銘柄が見つかりませんでした。</span>';
       return;
     }
-    renderScreenCards(data, market);
+    _lastScreen = { stocks, market_context: ctx, market };
+    renderScreenContext(ctx);
+    renderScreenCards(stocks, market);
   } catch (e) {
     cards.innerHTML = '<span class="screen-empty">⚠️ 取得に失敗しました。サーバーが起動しているか確認してください。</span>';
   }
+}
+
+// 市場環境バナー（恐怖指数・主要指数・相場観）
+function renderScreenContext(ctx) {
+  const box = document.getElementById('screenContext');
+  if (!ctx) { box.style.display = 'none'; return; }
+
+  const chips = [];
+  if (ctx.vix != null) {
+    const vc = ctx.vix < 20 ? 'sx-vix-low' : ctx.vix < 30 ? 'sx-vix-mid' : 'sx-vix-high';
+    chips.push(`<span class="sx-chip ${vc}" title="恐怖指数（VIX）">😱 VIX <b>${fmt(ctx.vix, 1)}</b> ${ctx.vix_level || ''}</span>`);
+  }
+  if (ctx.nikkei_pct != null) {
+    const c = ctx.nikkei_pct >= 0 ? 'up' : 'down';
+    chips.push(`<span class="sx-chip">日経 <b class="${c}">${ctx.nikkei_pct >= 0 ? '+' : ''}${fmt(ctx.nikkei_pct, 2)}%</b></span>`);
+  }
+  if (ctx.sp500_pct != null) {
+    const c = ctx.sp500_pct >= 0 ? 'up' : 'down';
+    chips.push(`<span class="sx-chip">S&P500 <b class="${c}">${ctx.sp500_pct >= 0 ? '+' : ''}${fmt(ctx.sp500_pct, 2)}%</b></span>`);
+  }
+  if (ctx.usdjpy != null) chips.push(`<span class="sx-chip">ドル円 <b>${fmt(ctx.usdjpy, 2)}</b></span>`);
+  if (ctx.sentiment)      chips.push(`<span class="sx-chip">🌡️ ${esc(ctx.sentiment)}</span>`);
+
+  const view = ctx.market_view
+    ? `<div class="sx-view">${esc(ctx.market_view)}</div>` : '';
+
+  box.innerHTML = `<div class="sx-row">${chips.join('')}</div>${view}`;
+  box.style.display = chips.length || view ? '' : 'none';
 }
 
 function renderScreenCards(stocks, market) {
@@ -2076,20 +2478,127 @@ function renderScreenCards(stocks, market) {
       ${sig.label}${sig.score != null ? `<span class="signal-score">${sig.score}点</span>` : ''}
     </span>`;
 
+    const outlookHtml = s.outlook
+      ? `<div class="sc-outlook">${esc(s.outlook)}</div>` : '';
+
     const isAdded = watched.has(s.code);
-    return `<div class="sc-card${isAdded ? ' sc-added' : ''}" id="sccard-${s.code}">
+    return `<div class="sc-card${isAdded ? ' sc-added' : ''}" id="sccard-${s.code}"
+        onclick="showScreenDetail('${s.code}','${market}')" title="クリックで詳細を表示">
       <span class="sc-rank">${i + 1}位</span>
-      <div class="sc-name">${flag} ${s.name}</div>
+      <div class="sc-name">${flag} ${esc(s.name)}</div>
       <div class="sc-code">${s.code}${isUS ? ' · NYSE/NASDAQ' : ' · 東証'}</div>
       <div class="sc-price">${price} ${chgStr}</div>
       ${meta ? `<div class="sc-meta">${meta}</div>` : ''}
+      ${outlookHtml}
       <div style="margin-top:4px">${sigHtml}</div>
-      <button class="sc-add-btn" onclick="addScreenedStock('${s.code}','${market}')"
+      <button class="sc-add-btn" onclick="event.stopPropagation();addScreenedStock('${s.code}','${market}')"
         ${isAdded ? 'disabled' : ''}>
         ${isAdded ? '✓ 追加済み' : '＋ ウォッチリストに追加'}
       </button>
     </div>`;
   }).join('');
+}
+
+// ── スクリーニング詳細パネル（カードクリックで下部に表示） ──
+let _screenDetailCode = null;
+
+function showScreenDetail(code, market, scroll = true) {
+  if (!_lastScreen) return;
+  const s = _lastScreen.stocks.find(x => x.code === code);
+  if (!s) return;
+  _screenDetailCode = code;
+
+  // 選択カードをハイライト
+  document.querySelectorAll('.sc-card.sc-selected').forEach(c => c.classList.remove('sc-selected'));
+  document.getElementById(`sccard-${code}`)?.classList.add('sc-selected');
+
+  const isUS = market === 'us';
+  const flag = isUS ? '🇺🇸' : '🇯🇵';
+  const price = s.price != null
+    ? (isUS ? '$' + fmtPrice(s.price, 2) : fmtPrice(s.price) + '円') : '—';
+  const chgCls = (s.chgpct ?? 0) >= 0 ? 'up' : 'down';
+  const chgStr = s.chgpct != null
+    ? `<span class="${chgCls}">${s.chgpct >= 0 ? '+' : ''}${fmt(s.chgpct, 2)}%</span>` : '';
+
+  // 指標グリッド
+  const metrics = [];
+  const push = (label, val) => { if (val) metrics.push(`<div class="sd-metric"><span>${label}</span><b>${val}</b></div>`); };
+  push('PER',      s.per != null ? fmt(s.per, 1) + '倍' : null);
+  push('PBR',      s.pbr != null ? fmt(s.pbr, 2) + '倍' : null);
+  push('配当利回り', s.div != null ? (s.div * 100).toFixed(2) + '%' : null);
+  push('52週位置',  s.pos52 != null ? s.pos52 + '%' : null);
+  push('時価総額',  s.cap != null ? fmtCap(s.cap, isUS) : null);
+  push('売上成長率', s.revenueGrowth != null ? (s.revenueGrowth * 100).toFixed(0) + '%' : null);
+  push('粗利率',    s.grossMargins != null ? (s.grossMargins * 100).toFixed(0) + '%' : null);
+  if (s.sector) push('セクター', esc(s.sector));
+
+  // スコアシグナル（スクリーニングカテゴリ基準）
+  const cat = document.getElementById('screenCategory').value;
+  const sig = calcSignal({
+    regularMarketPrice: s.price, fiftyTwoWeekHigh: s.high52, fiftyTwoWeekLow: s.low52,
+    trailingPE: s.per, priceToBook: s.pbr, dividendYield: s.div,
+    revenueGrowth: s.revenueGrowth, marketCap: s.cap, grossMargins: s.grossMargins, market,
+  }, cat);
+  const scoreHtml = `<span class="signal ${sig.cls}" style="font-size:0.72rem;padding:2px 7px">${sig.label}${sig.score != null ? `<span class="signal-score">${sig.score}点</span>` : ''}</span>`;
+
+  // AI未来予測
+  const forecastHtml = s.forecast
+    ? `<div class="sd-forecast">
+        <div class="sd-forecast-lbl">🔮 マクロ環境（恐怖指数・世界情勢）を踏まえた未来予測</div>
+        ${s.outlook ? `<div class="sd-outlook">${esc(s.outlook)}</div>` : ''}
+        <div class="sd-forecast-txt">${esc(s.forecast)}</div>
+      </div>`
+    : `<div class="sd-forecast"><div class="sd-forecast-txt" style="color:var(--text3)">
+        AI未来予測は生成されていません（サーバーに ANTHROPIC_API_KEY が未設定の場合は表示されません）。</div></div>`;
+
+  const watched = watchlist.find(x => x.code === code && x.market === market);
+  const addBtn = watched
+    ? `<button class="btn btn-sm" disabled>✓ 追加済み</button>`
+    : `<button class="btn btn-primary btn-sm" onclick="addScreenedStock('${code}','${market}')">＋ ウォッチリストに追加</button>`;
+
+  const box = document.getElementById('screenDetail');
+  box.innerHTML = `
+    <div class="sd-head">
+      <div class="sd-title">${flag} ${esc(s.name)}<span class="sd-code">${code}${isUS ? ' · NYSE/NASDAQ' : ' · 東証'}</span></div>
+      <button class="sd-close" onclick="closeScreenDetail()" title="閉じる">×</button>
+    </div>
+    <div class="sd-price">${price} ${chgStr}　${scoreHtml}</div>
+    ${forecastHtml}
+    <div class="sd-metrics">${metrics.join('')}</div>
+    <div class="sd-actions">
+      ${addBtn}
+      <button class="btn btn-sm" onclick="loadScreenProfile('${code}','${market}')">🏢 会社概要を表示</button>
+    </div>
+    <div class="sd-profile" id="sd-profile"></div>
+  `;
+  box.style.display = '';
+  if (scroll) box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function closeScreenDetail() {
+  _screenDetailCode = null;
+  const box = document.getElementById('screenDetail');
+  if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+  document.querySelectorAll('.sc-card.sc-selected').forEach(c => c.classList.remove('sc-selected'));
+}
+
+async function loadScreenProfile(code, market) {
+  const sec = document.getElementById('sd-profile');
+  if (!sec) return;
+  const ck = `${code}|${market}`;
+  if (_profileCache[ck]) { sec.innerHTML = buildProfileHtml(_profileCache[ck]); return; }
+  sec.innerHTML = `<div class="pf-loading"><span class="spinner"></span>会社概要を取得中…</div>`;
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/profile?code=${encodeURIComponent(code)}&market=${market}`,
+      { signal: AbortSignal.timeout(25000) }
+    );
+    const data = await res.json();
+    _profileCache[ck] = data;
+    sec.innerHTML = buildProfileHtml(data);
+  } catch (e) {
+    sec.innerHTML = `<div class="pf-err">⚠️ 会社概要の取得に失敗しました: ${e.message}</div>`;
+  }
 }
 
 async function addScreenedStock(code, market) {
@@ -2109,6 +2618,8 @@ async function addScreenedStock(code, market) {
     card.classList.add('sc-added');
     card.querySelector('.sc-add-btn').textContent = '✓ 追加済み';
   }
+  // 詳細パネルが同じ銘柄を表示中なら追加ボタンを更新（スクロールはしない）
+  if (_screenDetailCode === code) showScreenDetail(code, market, false);
 
   const data = await fetchYahooQuote(code, market);
   if (data) {
@@ -2124,6 +2635,92 @@ function buildRankBadge(rank) {
   if (rank === 2) return `<span class="rank-badge rank-2" title="スコア2位">2</span>`;
   if (rank === 3) return `<span class="rank-badge rank-3" title="スコア3位">3</span>`;
   return `<span class="rank-badge rank-n" title="スコア${rank}位">${rank}</span>`;
+}
+
+// ────────────────────────────────────────
+//  会社概要パネル（普段は隠して、ボタンで開閉）
+// ────────────────────────────────────────
+const _profileCache = {};   // { "code|market": data }
+
+async function toggleProfile(code, market) {
+  const sec = document.getElementById(`profile-section-${code}`);
+  const btn = document.getElementById(`profile-btn-${code}`);
+  if (!sec) return;
+
+  // 開いていたら閉じる
+  if (sec.style.display !== 'none') {
+    sec.style.display = 'none';
+    btn?.classList.remove('active');
+    return;
+  }
+
+  // 開く
+  sec.style.display = '';
+  btn?.classList.add('active');
+
+  // 既に取得済みなら再描画不要
+  if (sec.dataset.loaded === '1') return;
+
+  // ローディング表示
+  sec.innerHTML = `<div class="pf-loading"><span class="spinner"></span>会社概要を取得中…</div>`;
+
+  // キャッシュチェック
+  const ck = `${code}|${market}`;
+  if (_profileCache[ck]) {
+    sec.innerHTML = buildProfileHtml(_profileCache[ck]);
+    sec.dataset.loaded = '1';
+    return;
+  }
+
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/profile?code=${encodeURIComponent(code)}&market=${market}`,
+      { signal: AbortSignal.timeout(25000) }
+    );
+    const data = await res.json();
+    _profileCache[ck] = data;
+    sec.innerHTML = buildProfileHtml(data);
+    sec.dataset.loaded = '1';
+  } catch (e) {
+    sec.innerHTML = `<div class="pf-err">⚠️ 会社概要の取得に失敗しました: ${e.message}</div>`;
+  }
+}
+
+function buildProfileHtml(d) {
+  if (!d || !d.available) {
+    return `<div class="pf-err">⚠️ 会社情報を取得できませんでした${d?.error ? `（${d.error}）` : ''}</div>`;
+  }
+
+  const tags = [];
+  if (d.sector)   tags.push(`<span class="pf-tag pf-sector">${d.sector}</span>`);
+  if (d.industry) tags.push(`<span class="pf-tag pf-industry">${d.industry}</span>`);
+  if (typeof d.employees === 'number')
+    tags.push(`<span class="pf-tag">👥 ${d.employees.toLocaleString('ja-JP')}人</span>`);
+  if (d.founded)  tags.push(`<span class="pf-tag">📅 ${d.founded}年設立</span>`);
+  if (d.city || d.country) {
+    tags.push(`<span class="pf-tag">📍 ${[d.city, d.country].filter(Boolean).join(', ')}</span>`);
+  }
+  if (d.website) {
+    tags.push(`<a href="${d.website}" target="_blank" rel="noopener" class="pf-link">🔗 公式サイト</a>`);
+  }
+
+  const summaryJp = d.summary_jp ? `<div class="pf-summary">${d.summary_jp}</div>` : '';
+  const summaryEn = d.summary
+    ? `<details><summary style="cursor:pointer;font-size:0.72rem;color:var(--text3);margin-top:8px">原文（英語）を表示</summary>
+       <div class="pf-summary pf-en">${d.summary}</div></details>`
+    : '';
+  const noSummary = (!summaryJp && !summaryEn)
+    ? `<div style="color:var(--text3);font-size:0.82rem">事業内容の情報がありません</div>` : '';
+
+  return `
+    <div class="pf-hdr">
+      <span class="pf-name">🏢 ${d.name}</span>
+    </div>
+    ${tags.length ? `<div class="pf-tags">${tags.join('')}</div>` : ''}
+    ${summaryJp}
+    ${summaryEn}
+    ${noSummary}
+  `;
 }
 
 // ────────────────────────────────────────
@@ -2264,6 +2861,7 @@ async function showExplain(ev, code) {
         revenueGrowth:  d.revenueGrowth,
         grossMargins:   d.grossMargins,
         marketCap:      d.marketCap,
+        newsContext:    marketBrief?.news_summary || '',
       }),
       signal: AbortSignal.timeout(20000),
     });
@@ -2378,6 +2976,98 @@ document.getElementById('codeInput').addEventListener('keydown', e => {
 });
 
 // ────────────────────────────────────────
+//  マーケットブリーフィング
+// ────────────────────────────────────────
+let _briefCollapsed = false;
+
+function toggleBrief() {
+  _briefCollapsed = !_briefCollapsed;
+  document.getElementById('briefBody').style.display = _briefCollapsed ? 'none' : '';
+  document.getElementById('briefToggleIcon').textContent = _briefCollapsed ? '▶' : '▼';
+}
+
+async function loadMarketBrief() {
+  const body = document.getElementById('briefBody');
+  const meta = document.getElementById('briefGeneratedAt');
+  try {
+    const res  = await fetch(`${API_BASE}/api/market-brief`, { signal: AbortSignal.timeout(5000) });
+    const data = await res.json();
+    marketBrief = data;
+
+    if (!data.available) {
+      meta.textContent = '';
+      body.innerHTML = `<div class="brief-placeholder">📭 ${data.message || 'ブリーフィングはまだありません'}</div>`;
+      return;
+    }
+
+    meta.textContent = data.generated_at || '';
+    body.innerHTML = renderBriefBody(data);
+  } catch (e) {
+    meta.textContent = '';
+    body.innerHTML = '<div class="brief-placeholder">⚠️ サーバーに接続できません（start_server.bat を起動してください）</div>';
+  }
+}
+
+function renderBriefBody(d) {
+  const idx = d.indices || {};
+  const fx  = d.fx || {};
+
+  function idxHtml(label, key) {
+    const v = idx[key];
+    if (!v) return '';
+    const chg = v.change_pct;
+    const col = chg == null ? 'var(--text2)' : chg >= 0 ? 'var(--green)' : 'var(--red)';
+    const chgStr = chg == null ? '' : `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%`;
+    const val = v.value != null ? v.value.toLocaleString('ja-JP', { maximumFractionDigits: 2 }) : '—';
+    return `<div class="brief-idx">
+      <div class="idx-label">${label}</div>
+      <div class="idx-val">${val}</div>
+      ${chgStr ? `<div class="idx-chg" style="color:${col}">${chgStr}</div>` : ''}
+    </div>`;
+  }
+
+  const indicesHtml = [
+    idxHtml('日経225', 'nikkei'),
+    idxHtml('TOPIX',   'topix'),
+    idxHtml('NYダウ',  'dow'),
+    idxHtml('S&P500',  'sp500'),
+    idxHtml('NASDAQ',  'nasdaq'),
+    fx.usdjpy ? `<div class="brief-idx"><div class="idx-label">ドル円</div><div class="idx-val">${fx.usdjpy.toFixed(2)}円</div></div>` : '',
+    fx.eurjpy ? `<div class="brief-idx"><div class="idx-label">ユーロ円</div><div class="idx-val">${fx.eurjpy.toFixed(2)}円</div></div>` : '',
+  ].filter(Boolean).join('');
+
+  const highlightsHtml = (d.highlights || []).map(h =>
+    `<div class="brief-highlight">${h}</div>`
+  ).join('');
+
+  const hotHtml = (d.hot_stocks || []).map(s => {
+    const name = s.name || s.code || '';
+    const code = s.code ? `<span class="hot-code">（${s.code}）</span>` : '';
+    const reason = s.reason ? `<div class="hot-reason">${s.reason}</div>` : '';
+    return `<div class="brief-hot-item">
+      <div class="hot-name">${name}${code}</div>
+      ${reason}
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="brief-indices">${indicesHtml}</div>
+    ${highlightsHtml ? `<div class="brief-section">
+      <div class="brief-section-label">📌 本日の注目材料</div>
+      <div class="brief-highlights">${highlightsHtml}</div>
+    </div>` : ''}
+    ${hotHtml ? `<div class="brief-section">
+      <div class="brief-section-label">🔥 話題の銘柄</div>
+      <div class="brief-hot-stocks">${hotHtml}</div>
+    </div>` : ''}
+    ${d.sentiment ? `<div class="brief-section">
+      <div class="brief-section-label">💬 センチメント</div>
+      <div class="brief-sentiment">${d.sentiment}</div>
+    </div>` : ''}
+  `;
+}
+
+// ────────────────────────────────────────
 //  初期化
 // ────────────────────────────────────────
 async function init() {
@@ -2385,9 +3075,12 @@ async function init() {
   renderTable();
   updateStats();
 
-  // サーバー状態チェック
-  await checkServer();
-  if (!serverOk) return;
+  // サーバー状態チェック（リトライしながら接続を待つ）
+  const ok = await connectWithRetries();
+  if (!ok) return;
+
+  // ── マーケットブリーフィング読み込み ──────────────
+  loadMarketBrief();
 
   // ── ウォッチリストをサーバーから読み込み ──────────
   watchlist = await loadWatchlist();
